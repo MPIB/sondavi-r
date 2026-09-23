@@ -408,6 +408,11 @@ snapshot_frame <- function(s) {
 #' R would. Anything still not rectangular (a multiple-choice cell) stays a list
 #' column rather than being pasted into a string.
 #'
+#' An image marking answer becomes one column per marking type, as in the
+#' export: painted cells as row runs (`"12:31-40 13:30"` = row 12, columns 31 to
+#' 40, and row 13, column 30), pins as `"x,y"` pairs. For a heatmap, use
+#' [sondavi_markings()] instead, on the data before unnesting.
+#'
 #' @param data The result of [sondavi_responses()] or
 #'   [sondavi_snapshot_responses()].
 #' @param columns Which list columns to spread. Default: all of them.
@@ -455,6 +460,9 @@ sondavi_unnest <- function(data, columns = NULL) {
 # R's, so the +1/-1 lives here, once, rather than in every analysis script.
 flatten_answer <- function(value, prefix) {
   if (is.null(value) || (!is.list(value) && length(value) == 1 && is.na(value))) return(list())
+  # An image marking is one answer with its own column rule, not a tree of fields:
+  # the export writes one column per marking type, and so does this.
+  if (is_image_marking(value)) return(image_marking_columns(value, prefix))
   if (!is.list(value)) {
     leaf <- list(value)
     names(leaf) <- prefix
@@ -469,6 +477,182 @@ flatten_answer <- function(value, prefix) {
   })
 
   unlist(parts, recursive = FALSE)
+}
+
+# ---- Image marking ------------------------------------------------------------
+#
+# The stored answer of an image marking question carries its own image and grid:
+#   list(mode = "area", image = list(src, width, height), grid = list(cols, rows),
+#        cells = list(<category> = c(<cell index>, ...)))
+#   list(mode = "point", image = ..., points = list(list(x, y, category), ...))
+# A cell index is row * cols + col, counted from 0 at the top left. The conventions
+# are the platform's (App\Support\ImageAnnotation) and must stay identical to it:
+# a heatmap drawn from the API has to agree with one drawn from the export file.
+
+is_image_marking <- function(value) {
+  is.list(value) && !is.null(value$mode) && length(value$mode) == 1 &&
+    value$mode %in% c("area", "point") && is.list(value$image)
+}
+
+# One column per marking type, written exactly as the export writes it: painted
+# cells as row runs ("12:31-40 13:30"), pins as "x,y" pairs in the order set.
+image_marking_columns <- function(value, prefix) {
+  if (identical(value$mode, "point")) {
+    points <- value$points %||% list()
+    cats <- unique(vapply(points, function(p) as.character(p$category %||% ""), character(1)))
+    out <- lapply(cats, function(cat) {
+      mine <- Filter(function(p) identical(as.character(p$category %||% ""), cat), points)
+      paste(vapply(mine, function(p) paste0(short_number(p$x), ",", short_number(p$y)), character(1)), collapse = " ")
+    })
+    names(out) <- paste0(prefix, ".", cats)
+    return(out)
+  }
+
+  cols <- max(1L, as.integer(value$grid$cols %||% 1L))
+  cells <- value$cells %||% list()
+  out <- lapply(cells, function(ids) cell_runs(as.integer(unlist(ids)), cols))
+  names(out) <- paste0(prefix, ".", names(cells))
+  out
+}
+
+cell_runs <- function(cells, cols) {
+  cells <- sort(unique(cells))
+  if (!length(cells)) return("")
+  row <- cells %/% cols
+  # A new run starts wherever the next cell is not the right-hand neighbour in the same row.
+  starts <- c(TRUE, diff(cells) != 1L | diff(row) != 0L)
+  run <- cumsum(starts)
+  parts <- vapply(split(cells, run), function(r) {
+    from <- r[1] %% cols
+    to <- r[length(r)] %% cols
+    if (from == to) paste0(r[1] %/% cols, ":", from) else paste0(r[1] %/% cols, ":", from, "-", to)
+  }, character(1))
+  paste(parts, collapse = " ")
+}
+
+# 0.5 rather than 0.5000 or 5e-01, like the export.
+short_number <- function(x) {
+  s <- formatC(round(as.numeric(x), 4), format = "f", digits = 4)
+  s <- sub("0+$", "", s)
+  sub("\\.$", "", s)
+}
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+#' One row per marked cell or pin, for a heatmap
+#'
+#' Image marking questions arrive as one list column each, holding the stored
+#' answer: the image it was given on, the grid, and the painted cells or the pins.
+#' This turns them into the long table a heatmap is drawn from - the same rows and
+#' columns as `markings.csv` in the platform's image-markings export, so a script
+#' can switch between the file and the API without changes.
+#'
+#' Every row carries its position twice: `x_norm`/`y_norm` between 0 and 1 (left
+#' to right, top to bottom), and `x_px`/`y_px` in pixels of the original image -
+#' the mapping, already done. For a painted cell that is the cell's centre; `row`
+#' and `col` say which cell (counted from 0 at the top left) and are `NA` for pins.
+#' A cell covers `x_norm` from `col / cols` to `(col + 1) / cols`.
+#'
+#' Nothing is aggregated: no densities, areas or centroids.
+#'
+#' @param data The result of [sondavi_responses()] or
+#'   [sondavi_snapshot_responses()], before [sondavi_unnest()].
+#' @param columns Which questions. Default: every image marking question found.
+#' @return A data frame with `response_id`, `respondent_id` (when the data has
+#'   it), `completed_at`, `question`, `category`, `row`, `col`, `x_norm`,
+#'   `y_norm`, `x_px`, `y_px` and `image_src`. People who marked nothing
+#'   contribute no rows.
+#' @examples
+#' \dontrun{
+#' d <- sondavi_responses(con, 42)
+#' m <- sondavi_markings(d)
+#' green <- subset(m, question == "map" & category == "green")
+#' table(green$row, green$col)          # how many people marked each cell
+#' }
+#' @export
+sondavi_markings <- function(data, columns = NULL) {
+  found <- names(data)[vapply(data, function(x) {
+    is.list(x) && !is.data.frame(x) && any(vapply(x, is_image_marking, logical(1)))
+  }, logical(1))]
+  targets <- if (is.null(columns)) found else intersect(columns, found)
+
+  has_respondent <- "respondent_id" %in% names(data)
+  rows <- list()
+
+  for (question in targets) {
+    for (i in seq_len(nrow(data))) {
+      answer <- data[[question]][[i]]
+      if (!is_image_marking(answer)) next
+      marks <- image_marking_rows(answer)
+      if (!nrow(marks)) next
+      lead <- data.frame(response_id = rep(data$response_id[i], nrow(marks)))
+      if (has_respondent) lead$respondent_id <- rep(data$respondent_id[i], nrow(marks))
+      lead$completed_at <- rep(data$completed_at[i], nrow(marks))
+      lead$question <- question
+      rows[[length(rows) + 1L]] <- cbind(lead, marks)
+    }
+  }
+
+  out <- if (length(rows)) do.call(rbind, rows) else empty_markings(has_respondent)
+  rownames(out) <- NULL
+  if (requireNamespace("tibble", quietly = TRUE)) out <- tibble::as_tibble(out)
+  out
+}
+
+image_marking_rows <- function(answer) {
+  width <- as.numeric(answer$image$width %||% 0)
+  height <- as.numeric(answer$image$height %||% 0)
+  src <- as.character(answer$image$src %||% "")
+
+  if (identical(answer$mode, "point")) {
+    points <- answer$points %||% list()
+    if (!length(points)) return(empty_marks())
+    x <- vapply(points, function(p) as.numeric(p$x %||% 0), numeric(1))
+    y <- vapply(points, function(p) as.numeric(p$y %||% 0), numeric(1))
+    return(data.frame(
+      category = vapply(points, function(p) as.character(p$category %||% ""), character(1)),
+      row = NA_integer_, col = NA_integer_,
+      x_norm = round(x, 6), y_norm = round(y, 6),
+      x_px = round(x * width, 2), y_px = round(y * height, 2),
+      image_src = src, stringsAsFactors = FALSE
+    ))
+  }
+
+  cols <- max(1L, as.integer(answer$grid$cols %||% 1L))
+  rows <- max(1L, as.integer(answer$grid$rows %||% 1L))
+  cells <- answer$cells %||% list()
+  parts <- lapply(names(cells), function(cat) {
+    ids <- as.integer(unlist(cells[[cat]]))
+    if (!length(ids)) return(NULL)
+    r <- ids %/% cols
+    k <- ids %% cols
+    # The centre of the cell - the platform's +0.5 convention.
+    x <- (k + 0.5) / cols
+    y <- (r + 0.5) / rows
+    data.frame(
+      category = cat, row = r, col = k,
+      x_norm = round(x, 6), y_norm = round(y, 6),
+      x_px = round(x * width, 2), y_px = round(y * height, 2),
+      image_src = src, stringsAsFactors = FALSE
+    )
+  })
+  parts <- Filter(Negate(is.null), parts)
+  if (!length(parts)) return(empty_marks())
+  do.call(rbind, parts)
+}
+
+empty_marks <- function() {
+  data.frame(category = character(), row = integer(), col = integer(),
+             x_norm = numeric(), y_norm = numeric(), x_px = numeric(), y_px = numeric(),
+             image_src = character(), stringsAsFactors = FALSE)
+}
+
+empty_markings <- function(has_respondent) {
+  lead <- data.frame(response_id = integer())
+  if (has_respondent) lead$respondent_id <- character()
+  lead$completed_at <- as.POSIXct(character())
+  lead$question <- character()
+  cbind(lead, empty_marks())
 }
 
 #' Join the waves of a study series into one wide table

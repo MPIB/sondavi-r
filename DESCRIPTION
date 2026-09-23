@@ -1,6 +1,6 @@
 Package: sondavi
 Title: Read Your Own Study Data from the Sondavi Survey Platform
-Version: 0.2.1
+Version: 0.3.0
 Authors@R: person("Max Planck Institute for Human Development", role = c("aut", "cre"),
                   email = "arc-support@mpib-berlin.mpg.de")
 Description: Reads responses and variable metadata of your own studies from the

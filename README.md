@@ -50,6 +50,7 @@ at most 90 days.
 | `sondavi_snapshot_responses(con, snapshot_id)` | replay one |
 | `sondavi_fingerprint(d)` | the line that belongs in your paper |
 | `sondavi_unnest(d)` | spread matrices and dynamic panels into one column each |
+| `sondavi_markings(d)` | image marking answers as one row per cell or pin, for a heatmap |
 | `sondavi_waves(con, ids)` | join the waves of a study series by respondent |
 
 `sondavi_responses()` applies the codebook by default, so a categorical question arrives as
@@ -76,6 +77,22 @@ flat <- sondavi_unnest(d)
 names(flat)
 #> … "ratings.speed.score" "ratings.clarity.score" "contacts.0.who"
 ```
+
+## Image marking
+
+An image marking question (participants paint areas or set pins on a map or picture) arrives
+as the stored answer — the image, the grid, and the cells or pins. For a heatmap:
+
+```r
+m <- sondavi_markings(d)
+green <- subset(m, question == "map" & category == "green")
+table(green$row, green$col)          # how many people marked each cell
+```
+
+One row per painted cell or pin, with its position between 0 and 1 (`x_norm`, `y_norm`) and in
+pixels of the original image (`x_px`, `y_px`) — the same table as the platform's
+image-markings export. `sondavi_unnest()` writes these questions the way the CSV export does:
+one column per marking type, cells as row runs (`"2:3-5 3:4"`), pins as `"x,y"` pairs.
 
 ## Waves of a study series
 

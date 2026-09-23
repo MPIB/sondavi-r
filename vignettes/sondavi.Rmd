@@ -121,6 +121,20 @@ names(flat)
 Those are the same names the platform's own export writes, so an analysis built
 on an exported file and one built on the API agree on what a variable is called.
 
+### Image marking
+
+An image marking question stores the image, the grid and the painted cells or
+the pins. For a heatmap, one row per cell or pin:
+
+```{r}
+m <- sondavi_markings(d)
+head(m[, c("question", "category", "row", "col", "x_px", "y_px")])
+```
+
+`x_norm`/`y_norm` are the position between 0 and 1, `x_px`/`y_px` the same in
+pixels of the original image - the mapping, already done. The table is the one
+the platform's image-markings export writes.
+
 ## Joining waves
 
 ```{r}

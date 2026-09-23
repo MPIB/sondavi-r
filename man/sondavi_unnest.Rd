@@ -28,6 +28,11 @@ A matrix cell becomes \code{question.row.column}, an entry of a dynamic panel
 \code{question.0.field} — counting from zero, as the export does, not from one as
 R would. Anything still not rectangular (a multiple-choice cell) stays a list
 column rather than being pasted into a string.
+
+An image marking answer becomes one column per marking type, as in the
+export: painted cells as row runs (\code{"12:31-40 13:30"} = row 12, columns 31 to
+40, and row 13, column 30), pins as \code{"x,y"} pairs. For a heatmap, use
+\code{\link[=sondavi_markings]{sondavi_markings()}} instead, on the data before unnesting.
 }
 \examples{
 \dontrun{

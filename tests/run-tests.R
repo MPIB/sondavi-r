@@ -204,8 +204,41 @@ ok("naming one column leaves the others nested",
 # Every name unnest produces must be one the codebook knows: that is the coupling worth a test,
 # because both sides derive it separately.
 cb_names <- cb$name[!is.na(cb$name)]
-produced <- grep("^(ratings|contacts)\\.", names(flat), value = TRUE)
+produced <- grep("^(ratings|contacts|map|visits)\\.", names(flat), value = TRUE)
 ok("every flattened name appears in the codebook", all(produced %in% cb_names))
+
+cat("\nImage marking\n")
+# The API sends the stored answer (image, grid, cells or pins); unnest has to write it the way
+# the export does - one column per marking type - not as a tree of image.src, grid.cols, ...
+ok("an area answer becomes one column per marking type",
+   all(c("map.green", "map.red") %in% names(flat)))
+ok("none of the stored structure leaks out as columns",
+   !any(grepl("^(map|visits)\\.(mode|image|grid|cells|points)", names(flat))))
+ok("painted cells are written as row runs, like the export", flat$map.green[1] == "2:3-5 3:4")
+ok("a single cell has no dash", flat$map.red[1] == "6:4")
+ok("a type nobody used in this answer is NA", is.na(flat$map.red[2]))
+ok("pins are x,y pairs in the order set", flat$visits.visit[1] == "0.25,0.5 0.7,0.1234")
+ok("someone who set no pins gets NA", is.na(flat$visits.visit[2]))
+
+m <- sondavi_markings(dl)
+ok("the long table has one row per cell and per pin", nrow(m) == 4 + 1 + 1 + 2)
+ok("with the columns of the export's markings.csv",
+   identical(names(m), c("response_id", "respondent_id", "completed_at", "question", "category",
+                         "row", "col", "x_norm", "y_norm", "x_px", "y_px", "image_src")))
+cell <- m[m$question == "map" & m$category == "green", ][1, ]
+ok("a cell is named by row and column, counted from 0", cell$row == 2 && cell$col == 3)
+# The centre of cell (2, 3) on a 16 x 11 grid over 1600 x 1100 px.
+ok("placed at its centre, relative to the image", abs(cell$x_norm - 3.5 / 16) < 1e-6 && abs(cell$y_norm - 2.5 / 11) < 1e-6)
+ok("and in pixels of the original image", cell$x_px == 350 && cell$y_px == 250)
+pin <- m[m$question == "visits", ][2, ]
+ok("a pin has no cell", is.na(pin$row) && is.na(pin$col))
+ok("but both coordinates", pin$x_norm == 0.7 && pin$y_px == round(0.1234 * 1100, 2))
+ok("each row says which image it was drawn on", all(m$image_src == "/storage/test/TEST-map.png"))
+ok("and whose answer it is", all(m$respondent_id[m$question == "visits"] == "PNL-1"))
+ok("one question can be asked for", all(sondavi_markings(dl, columns = "visits")$question == "visits"))
+none <- sondavi_markings(dl[, setdiff(names(dl), c("map", "visits"))])
+ok("a study without image marking gives an empty table, same columns",
+   nrow(none) == 0 && identical(names(none), names(m)))
 
 cat("\nJoining waves\n")
 waves <- sondavi_waves(con, s$id[1:2], names = c("w1", "w2"))
