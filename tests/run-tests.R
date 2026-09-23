@@ -1,6 +1,6 @@
 # Plain-R test runner (testthat is not installed on the build host).
 #   Rscript tests/run-tests.R
-# Expects the fixture server on 127.0.0.1:8765 — see tests/fixture-server.py.
+# Expects the fixture server — started by tests/run.py, which passes its port.
 
 # Installed package if there is one (that is how `R CMD check` runs), otherwise the
 # sources next door (that is how one runs it while working on them).
@@ -13,7 +13,10 @@ if (!requireNamespace("sondavi", quietly = TRUE)) {
   sondavi_get <- getFromNamespace("sondavi_get", "sondavi")
 }
 
-BASE <- "http://127.0.0.1:8765"
+# Der Port kommt aus tests/run.py, das einen freien waehlt: ein fester ist eine Wette auf
+# die Maschine, und CI-Laeufer bringen eigene Dienste mit.
+PORT <- Sys.getenv("SONDAVI_TEST_PORT", "8765")
+BASE <- paste0("http://127.0.0.1:", PORT)
 
 # The checks need the fixture server (tests/run.sh starts it). Inside `R CMD check`
 # it is not there, and a package whose tests demand a local server would simply be

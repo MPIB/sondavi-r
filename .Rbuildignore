@@ -3,6 +3,7 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
 ^tests/run\.sh$
+^tests/run\.py$
 ^tests/fixture-server\.py$
 ^tests/fixtures$
 ^LICENSE\.md$

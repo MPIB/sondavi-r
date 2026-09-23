@@ -1,3 +1,15 @@
+# sondavi 0.2.1
+
+Test infrastructure only; the package itself is unchanged.
+
+The run picks a free port instead of a fixed one, and checks that the answer on it comes
+from the fixture server rather than merely that something is listening — a foreign
+service passed the old check, and the tests then ran against it and hung. When the server
+does not come up, its output is printed instead of a bare timeout.
+
+Not a theoretical worry: the Python package lost a CI cycle to a fixed port a macOS
+runner already held.
+
 # sondavi 0.2.0
 
 ## Timestamps are timestamps (changes existing behaviour)

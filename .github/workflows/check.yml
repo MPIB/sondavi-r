@@ -47,4 +47,4 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
 
-      - run: tests/run.sh
+      - run: python tests/run.py
