@@ -7,14 +7,25 @@
 sondavi_snapshot_responses(con, snapshot_id, labels = TRUE)
 }
 \arguments{
-\item{con}{A connection from [sondavi_connect()].}
+\item{con}{A connection from \code{\link[=sondavi_connect]{sondavi_connect()}}.}
 
-\item{snapshot_id}{The id from [sondavi_snapshot()].}
+\item{snapshot_id}{The id from \code{\link[=sondavi_snapshot]{sondavi_snapshot()}}.}
 
 \item{labels}{Apply the codebook.}
 }
+\value{
+A data frame of the recorded responses, carrying the attributes
+\code{sondavi_snapshot}, \code{sondavi_complete} and \code{sondavi_read_as_recorded}.
+}
 \description{
-The `complete` attribute is the point: `FALSE` means some of the responses are
-gone - through retention or an erasure request - so the dataset behind a
-published result no longer exists in full. That is information, not an error.
+The \code{sondavi_complete} attribute is the point: \code{FALSE} means some of the
+responses are gone - through retention or an erasure request - so the dataset
+behind a published result no longer exists in full. That is information, not
+an error, and it comes with a warning naming how many are missing.
+}
+\details{
+\code{sondavi_read_as_recorded} says whether your token reads the same columns the
+snapshot was recorded with. When it is \code{FALSE} the recorded fingerprint does
+not describe what you received - the rows are narrower on purpose - so no
+comparison is made and nothing is wrong.
 }

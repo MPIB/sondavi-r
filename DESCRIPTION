@@ -1,6 +1,6 @@
 Package: sondavi
 Title: Read Your Own Study Data from the Sondavi Survey Platform
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: person("Max Planck Institute for Human Development", role = c("aut", "cre"),
                   email = "arc-support@mpib-berlin.mpg.de")
 Description: Reads responses and variable metadata of your own studies from the
@@ -13,7 +13,9 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 4.1)
 Imports: httr2, jsonlite, utils
-Suggests: tibble
+Suggests: tibble, knitr, rmarkdown
+VignetteBuilder: knitr
 URL: https://github.com/MPIB/sondavi-r
 BugReports: https://github.com/MPIB/sondavi-r/issues
+Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.1.0

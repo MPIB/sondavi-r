@@ -9,6 +9,13 @@
 #'   script travels with the script into version control, onto shared drives and
 #'   into supplementary material. Add it to ~/.Renviron instead.
 #' @return A connection object for the other functions in this package.
+#' @examples
+#' \dontrun{
+#' # The token comes from ~/.Renviron (SONDAVI_TOKEN=sdv_...), not from the
+#' # script - a token written into a script travels with it into version
+#' # control and into supplementary material.
+#' con <- sondavi_connect("https://survey.example.org")
+#' }
 #' @export
 sondavi_connect <- function(base_url, token = Sys.getenv("SONDAVI_TOKEN")) {
   if (!nzchar(base_url)) stop("base_url is empty.", call. = FALSE)

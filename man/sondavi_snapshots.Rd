@@ -7,7 +7,7 @@
 sondavi_snapshots(con)
 }
 \arguments{
-\item{con}{A connection from [sondavi_connect()].}
+\item{con}{A connection from \code{\link[=sondavi_connect]{sondavi_connect()}}.}
 }
 \description{
 The snapshots you have recorded

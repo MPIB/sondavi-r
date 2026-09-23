@@ -15,12 +15,12 @@ sondavi_responses(
 )
 }
 \arguments{
-\item{con}{A connection from [sondavi_connect()].}
+\item{con}{A connection from \code{\link[=sondavi_connect]{sondavi_connect()}}.}
 
 \item{survey_id}{The study's id.}
 
 \item{since}{Only responses recorded at or after this time. Anything
-[as.POSIXct()] understands, or an ISO-8601 string.}
+\code{\link[=as.POSIXct]{as.POSIXct()}} understands, or an ISO-8601 string.}
 
 \item{include_test}{Include responses collected through the test link.}
 
@@ -32,11 +32,28 @@ sondavi_responses(
 }
 \value{
 A data frame (a tibble if the package is installed). The dataset
-  fingerprint is attached as the attribute `sondavi_fingerprint`; see
-  [sondavi_fingerprint()].
+fingerprint is attached as the attribute \code{sondavi_fingerprint}; see
+\code{\link[=sondavi_fingerprint]{sondavi_fingerprint()}}.
 }
 \description{
-Walks the pages for you. With `labels = TRUE` (the default) the study's
+Walks the pages for you. With \code{labels = TRUE} (the default) the study's
 codebook is applied, so categorical questions arrive as factors with their
 real labels instead of bare codes.
+}
+\details{
+These are the same rows as the platform's JSON export, which means \strong{partial
+responses are included} when the study saves them: someone who stopped
+halfway is a row whose \code{completed_at} is \code{NA}. \code{nrow()} is therefore not the
+number of completed participations - use
+\code{subset(d, !is.na(completed_at))} when that is what you mean.
+}
+\examples{
+\dontrun{
+d <- sondavi_responses(con, 42)
+table(d$mood)                             # a factor with its real labels
+done <- subset(d, !is.na(completed_at))   # drop partial responses
+mean(difftime(done$completed_at, done$started_at, units = "mins"))
+
+recent <- sondavi_responses(con, 42, since = Sys.Date() - 7)
+}
 }

@@ -49,13 +49,45 @@ at most 90 days.
 | `sondavi_snapshot(con, id)` | record a citable dataset |
 | `sondavi_snapshot_responses(con, snapshot_id)` | replay one |
 | `sondavi_fingerprint(d)` | the line that belongs in your paper |
+| `sondavi_unnest(d)` | spread matrices and dynamic panels into one column each |
+| `sondavi_waves(con, ids)` | join the waves of a study series by respondent |
 
 `sondavi_responses()` applies the codebook by default, so a categorical question arrives as
 a factor with its real labels rather than as bare codes, and the question text rides along
 as a `label` attribute. Pass `labels = FALSE` for the raw values.
 
+`completed_at` and `started_at` arrive as real `POSIXct` timestamps in the platform's time
+zone, so a duration is `difftime(d$completed_at, d$started_at)` and not a parsing exercise.
+
+These are the same rows as the platform's JSON export, which means **partial responses are
+included** when the study saves them — someone who stopped halfway is a row whose
+`completed_at` is `NA`. `nrow(d)` is therefore not the number of completed participations:
+
+```r
+done <- subset(d, !is.na(completed_at))
+```
+
 Nested answers — matrices, dynamic panels, jsPsych trials — stay as list columns. Flattening
-them here would invent a shape the platform did not give.
+them here would invent a shape the platform did not give. When you do want the flat form,
+`sondavi_unnest()` produces exactly the column names the platform's own export writes:
+
+```r
+flat <- sondavi_unnest(d)
+names(flat)
+#> … "ratings.speed.score" "ratings.clarity.score" "contacts.0.who"
+```
+
+## Waves of a study series
+
+```r
+d <- sondavi_waves(con, c(42, 43), names = c("baseline", "followup"))
+table(returned = !is.na(d$mood_followup))
+```
+
+Columns are suffixed per wave, and **everyone seen in any wave is kept** — a person who
+did not take the follow-up is still a row, with `NA` in its columns. Attrition is usually
+what a longitudinal design is about, so an inner join would drop exactly the cases you
+want to describe.
 
 ## Fetching only what is new
 
@@ -86,9 +118,21 @@ get a warning saying how many, rather than a quietly smaller dataset.
 
 ## Identifiers
 
-Answers always come through. The participant identifier and the IP address only if the token
-was given those abilities when you created it, and never beyond what the study's own privacy
-level allows — an anonymous study returns no identifier whatever the token says.
+Answers always come through. Two groups only if the token was given those abilities when you
+created it: the **participant identifier**, and the **technical data** — the IP address plus
+the device traits a study records if it collects them (browser, operating system, screen
+resolution, window size, time zone, browser language), which together identify a device
+fairly well. Neither ever goes beyond what the study's own privacy level allows: an anonymous
+study returns no identifier whatever the token says.
+
+Everything else is your study's own data and always arrives — which experimental group
+someone was in, their language, the order questions were shown in.
+
+## The whole thing, end to end
+
+```r
+vignette("sondavi")
+```
 
 ## Tests
 

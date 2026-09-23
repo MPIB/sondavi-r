@@ -13,13 +13,13 @@ sondavi_snapshot(
 )
 }
 \arguments{
-\item{con}{A connection from [sondavi_connect()].}
+\item{con}{A connection from \code{\link[=sondavi_connect]{sondavi_connect()}}.}
 
 \item{survey_id}{The study's id.}
 
 \item{label}{Your own note, e.g. "Paper, figure 2".}
 
-\item{since, include_test}{As in [sondavi_responses()].}
+\item{since, include_test}{As in \code{\link[=sondavi_responses]{sondavi_responses()}}.}
 }
 \value{
 A one-row data frame describing the snapshot.
@@ -29,4 +29,14 @@ A live query is not a dataset: run the analysis again next month and it may
 return more rows, or fewer. A snapshot names the set a published result was
 computed from. It records which responses belonged to it - never a copy of
 the answers, so retention and the right to erasure keep working.
+}
+\examples{
+\dontrun{
+snap <- sondavi_snapshot(con, 42, label = "Paper, figure 2")
+snap$id        # the UUID that goes in the paper
+
+# Later, to reproduce. Warns if responses have been deleted since.
+d <- sondavi_snapshot_responses(con, snap$id)
+attr(d, "sondavi_complete")
+}
 }

@@ -7,7 +7,7 @@
 sondavi_fingerprint(data)
 }
 \arguments{
-\item{data}{The result of [sondavi_responses()].}
+\item{data}{The result of \code{\link[=sondavi_responses]{sondavi_responses()}}.}
 }
 \value{
 A one-line character string, invisibly also printed.
@@ -16,4 +16,11 @@ A one-line character string, invisibly also printed.
 A live query is not a dataset: run the same script tomorrow and it may return
 different rows. Record this line next to the result, so a later run that
 differs is recognisable as a different dataset rather than a silent correction.
+}
+\examples{
+\dontrun{
+d <- sondavi_responses(con, 42)
+sondavi_fingerprint(d)
+#> survey 42, 318 rows, fetched 2026-09-23T09:32:29+00:00, digest 332f3d2a1fbfd880
+}
 }

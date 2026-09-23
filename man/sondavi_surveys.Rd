@@ -7,11 +7,17 @@
 sondavi_surveys(con)
 }
 \arguments{
-\item{con}{A connection from [sondavi_connect()].}
+\item{con}{A connection from \code{\link[=sondavi_connect]{sondavi_connect()}}.}
 }
 \value{
 A data frame with one row per study.
 }
 \description{
 The studies this token may read
+}
+\examples{
+\dontrun{
+con <- sondavi_connect("https://survey.example.org")
+sondavi_surveys(con)
+}
 }

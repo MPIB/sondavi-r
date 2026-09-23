@@ -1,0 +1,200 @@
+---
+title: "From a study to an analysis"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{From a study to an analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+This walks through one analysis end to end: connecting, finding out what the
+variables mean, fetching the data, joining two waves, and recording what a
+published figure was computed from.
+
+Nothing here runs when the vignette is built — the code needs a platform and a
+token of your own.
+
+## Connecting
+
+Create a token under **your account menu → API Tokens** on your platform, then
+put it in your environment rather than in the script:
+
+```
+# ~/.Renviron
+SONDAVI_TOKEN=sdv_…
+```
+
+Restart R, and:
+
+```{r}
+library(sondavi)
+
+con <- sondavi_connect("https://survey.your-institute.org")
+```
+
+A token written into an analysis script travels with it into version control,
+onto shared drives and into supplementary material. That is the most common way
+one leaks, which is why `sondavi_connect()` reads the environment by default.
+
+## What is there
+
+```{r}
+sondavi_surveys(con)
+#>    id                  title project    status       privacy response_count
+#> 1  42       Wave 1 baseline   Ageing published     identified            318
+#> 2  43       Wave 2 follow-up  Ageing published     identified            274
+```
+
+The token only ever shows the studies it was given. If one is missing, the token
+was scoped to something narrower — that is the scope, not an error.
+
+## What the variables mean
+
+```{r}
+cb <- sondavi_codebook(con, 42)
+cb[, c("name", "label", "type")]
+#>                  name                        label        type
+#> 1                 age             How old are you?      string
+#> 2                mood            How is your mood? categorical
+#> 3 ratings.speed.score Rate the study — Speed × score     numeric
+```
+
+This is the part a CSV cannot carry: the intended type and the value labels
+behind each code.
+
+```{r}
+cb$value_labels[[2]]
+#>   value    text
+#> 1     1     Bad
+#> 2     2 Neutral
+#> 3     3    Good
+```
+
+## The data
+
+```{r}
+d <- sondavi_responses(con, 42)
+```
+
+All pages are fetched for you, and the codebook is applied: `mood` arrives as a
+factor with those labels rather than as `"1"`, `"2"`, `"3"`, and every column
+carries its question text.
+
+```{r}
+table(d$mood)
+attr(d$mood, "label")
+#> [1] "How is your mood?"
+```
+
+### Two things worth knowing before you count anything
+
+**Partial responses are included** when the study saves them, exactly as in the
+platform's export. Someone who stopped halfway is a row whose `completed_at` is
+`NA`:
+
+```{r}
+nrow(d)                                  # everyone who started
+done <- subset(d, !is.na(completed_at))  # everyone who finished
+```
+
+**Timestamps are timestamps**, not text, so durations work directly:
+
+```{r}
+summary(as.numeric(difftime(done$completed_at, done$started_at, units = "mins")))
+```
+
+### Nested questions
+
+Matrices and dynamic panels arrive as list columns — flattening them on arrival
+would invent a shape the platform did not give. When you want the flat form:
+
+```{r}
+flat <- sondavi_unnest(d)
+names(flat)
+#> … "ratings.speed.score" "ratings.clarity.score"
+```
+
+Those are the same names the platform's own export writes, so an analysis built
+on an exported file and one built on the API agree on what a variable is called.
+
+## Joining waves
+
+```{r}
+d <- sondavi_waves(con, c(42, 43), names = c("baseline", "followup"))
+```
+
+Each wave's columns are suffixed, so `mood` becomes `mood_baseline` and
+`mood_followup` instead of colliding. **Everyone seen in any wave is kept**: a
+person who did not take the follow-up is still a row, with `NA` in its columns.
+
+That is deliberate. Attrition is usually what a longitudinal design is about, and
+an inner join would silently drop exactly the people you want to describe:
+
+```{r}
+table(returned = !is.na(d$mood_followup))
+```
+
+The match needs an identifier, so the token must carry the respondent ability and
+the studies must not be anonymous. An anonymous study is not linkable by design,
+and the function says so rather than guessing.
+
+## Making the result citable
+
+A live query is not a dataset. Run the same script next month and it may return
+more rows, or fewer — new responses arrive, and retention or a data-subject
+request may remove some.
+
+The cheap version is to record the fingerprint next to your result:
+
+```{r}
+sondavi_fingerprint(d)
+#> survey 42, 318 rows, fetched 2026-09-23T09:32:29+00:00, digest 332f3d2a1fbfd880
+```
+
+The better version, for anything you publish, is a snapshot:
+
+```{r}
+snap <- sondavi_snapshot(con, 42, label = "Paper, figure 2")
+snap$id
+#> [1] "8869174a-a6c7-4cbc-9a9e-2785dcecba51"
+```
+
+Put that UUID in the paper. A snapshot records *which* responses the figure was
+computed from — never a copy of them, so erasure requests and retention keep
+working on the real data.
+
+Later, to reproduce:
+
+```{r}
+d <- sondavi_snapshot_responses(con, snap$id)
+attr(d, "sondavi_complete")
+#> [1] TRUE
+```
+
+If responses have been deleted since, you get a warning naming how many, and
+`sondavi_complete` is `FALSE`. That is not an error — it is the answer you need
+before re-running the analysis behind a published figure.
+
+A colleague can replay your snapshot to reproduce your analysis. They never see
+more than their own token allows: if yours carried identifiers and theirs does
+not, they get the same rows with fewer columns, and are told that the recorded
+fingerprint does not describe what they received.
+
+## Fetching only what is new
+
+For a study still collecting, ask for the increment rather than everything:
+
+```{r}
+recent <- sondavi_responses(con, 42, since = Sys.Date() - 7)
+```
+
+## When something goes wrong
+
+The platform limits how often a token may be used and says how long to wait. The
+package waits that long and retries; it does not hammer. This is the main reason
+to use it rather than write the calls yourself — that, and every read being
+recorded in the study's activity log under a recognisable user agent.

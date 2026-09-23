@@ -21,3 +21,11 @@ A connection object for the other functions in this package.
 \description{
 Connect to a survey platform
 }
+\examples{
+\dontrun{
+# The token comes from ~/.Renviron (SONDAVI_TOKEN=sdv_...), not from the
+# script - a token written into a script travels with it into version
+# control and into supplementary material.
+con <- sondavi_connect("https://survey.example.org")
+}
+}

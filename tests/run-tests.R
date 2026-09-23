@@ -69,12 +69,19 @@ fails_with("a study out of scope says so without guessing", "not given access",
 
 cat("\nListing and codebook\n")
 s <- sondavi_surveys(con)
-ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 1)
-ok("with the platform's own fields", s$id[1] == 135 && s$response_count[1] == 3)
+ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 2)
+# Not a written-down id: `clients/fixtures-aufzeichnen.sh` records a fresh study each
+# time, so a constant here would fail the suite for a reason that has nothing to do
+# with the client.
+SURVEY <- s$id[1]
+ok("with the platform's own fields", is.numeric(SURVEY) && s$response_count[1] == 3)
 ok("and the privacy level", s$privacy[1] == "identified")
 
-cb <- sondavi_codebook(con, 135)
-ok("the codebook lists every variable", nrow(cb) == 3)
+cb <- sondavi_codebook(con, SURVEY)
+# Named, not counted: adding a question to the recorded study should not fail a test
+# about the codebook arriving at all.
+ok("the codebook lists every variable",
+   all(c("age", "mood", "why") %in% cb$name) && "ratings.speed.score" %in% cb$name)
 # Measured, not assumed: a `text` question with inputType "number" is classified
 # `string` by the platform (SurveyExportService::classifyVariableType matches on the
 # SurveyJS type alone). The package must not pretend otherwise — the values still
@@ -84,20 +91,30 @@ ok("and the value labels of the categorical one",
    nrow(cb$value_labels[[which(cb$name == "mood")]]) == 3)
 
 cat("\nResponses\n")
-d <- sondavi_responses(con, 135, labels = FALSE)
+d <- sondavi_responses(con, SURVEY, labels = FALSE)
 ok("every page is walked, not just the first", nrow(d) == 3)
 ok("no row is fetched twice", length(unique(d$response_id)) == 3)
 ok("the granted identifier is there", "respondent_id" %in% names(d))
 ok("the ungranted one is not", !"ip_address" %in% names(d))
 
 cat("\nThe codebook is what makes this better than a CSV\n")
-dl <- sondavi_responses(con, 135)
+dl <- sondavi_responses(con, SURVEY)
 ok("a categorical question becomes a factor", is.factor(dl$mood))
 ok("with the real labels, not the codes",
    all(levels(dl$mood) == c("Bad", "Neutral", "Good")))
 ok("the first answer reads as its label", as.character(dl$mood[1]) == "Good")
 ok("a numeric question is numeric", is.numeric(dl$age))
 ok("the question text rides along", attr(dl$age, "label") == "How old are you?")
+
+# Timestamps as timestamps. As text they are a quiet trap: comparing a character
+# column against a date returns an answer instead of an error, and sorting by it
+# sorts lexically. Both reach a result without ever looking wrong.
+ok("completed_at is a point in time, not text", inherits(dl$completed_at, "POSIXct"))
+ok("started_at too", inherits(dl$started_at, "POSIXct"))
+ok("the platform's time zone is honoured",
+   identical(attr(dl$completed_at, "tzone"), "UTC"))
+ok("so a duration can simply be computed",
+   all(as.numeric(difftime(dl$completed_at, dl$started_at, units = "mins")) > 0))
 
 cat("\nThe fingerprint\n")
 fp <- attr(dl, "sondavi_fingerprint")
@@ -107,7 +124,7 @@ ok("it names the abilities the token had", "identifiers:respondent" %in% fp$abil
 ok("and prints one line for the paper", grepl("digest", sondavi_fingerprint(dl)))
 
 cat("\nLimits\n")
-ok("max_rows stops the walk early", nrow(sondavi_responses(con, 135, max_rows = 1, labels = FALSE)) == 1)
+ok("max_rows stops the walk early", nrow(sondavi_responses(con, SURVEY, max_rows = 1, labels = FALSE)) == 1)
 
 # The platform limits per token and says how long to wait. A client that retries
 # without reading Retry-After turns a small limit into a long outage — and this is
@@ -115,10 +132,12 @@ ok("max_rows stops the walk early", nrow(sondavi_responses(con, 135, max_rows = 
 t0 <- Sys.time()
 flaky <- sondavi_get(con, "surveys", list(flaky = 1))
 waited <- as.numeric(Sys.time() - t0, units = "secs")
-ok("a 429 is waited out rather than hammered", length(flaky$data) == 1 && waited >= 1)
+# Counted against the study list rather than a literal: what this asserts is that the real
+# answer arrives after the wait, not how many studies the recording happens to hold.
+ok("a 429 is waited out rather than hammered", length(flaky$data) == nrow(s) && waited >= 1)
 
 cat("\nCitable datasets\n")
-snap <- sondavi_snapshot(con, 135, label = "Paper, figure 2")
+snap <- sondavi_snapshot(con, SURVEY, label = "Paper, figure 2")
 ok("a snapshot is cited by a uuid", grepl("^[0-9a-f-]{36}$", snap$id))
 ok("it records how many responses were in the set", snap$recorded_rows == 3)
 ok("and is complete when nothing has changed", isTRUE(snap$complete))
@@ -141,7 +160,63 @@ ok("a deleted response shrinks the replay", nrow(erased) == 2)
 ok("the set is reported as no longer complete", !isTRUE(attr(erased, "sondavi_complete")))
 ok("and the analyst is warned in words", exists("warned") && grepl("deleted since", warned))
 
+# A token that reads FEWER columns than the snapshot was recorded with. Its digest
+# cannot match by design - the rows are deliberately narrower - and reporting that as
+# "the dataset has changed" is a false alarm. Measured against the running platform:
+# it did exactly that, and a warning that fires when nothing is wrong teaches the
+# analyst to ignore the one case it exists for.
+NARROWED <- "00000000-0000-4000-8000-000000000002"
+narrow_warning <- NULL
+narrow_note <- NULL
+narrowed <- withCallingHandlers(
+  sondavi_snapshot_responses(con, NARROWED, labels = FALSE),
+  warning = function(w) { narrow_warning <<- conditionMessage(w); invokeRestart("muffleWarning") },
+  message = function(m) { narrow_note <<- conditionMessage(m); invokeRestart("muffleMessage") }
+)
+ok("a narrowed replay still returns every recorded row", nrow(narrowed) == 3)
+ok("and is not reported as a deletion", is.null(narrow_warning))
+ok("the set counts as complete", isTRUE(attr(narrowed, "sondavi_complete")))
+ok("the reader is told why the fingerprint does not apply", !is.null(narrow_note))
+ok("and that it was read differently than recorded",
+   !isTRUE(attr(narrowed, "sondavi_read_as_recorded")))
+
 ok("the recorded snapshots can be listed", nrow(sondavi_snapshots(con)) >= 1)
+
+cat("\nNested answers\n")
+flat <- sondavi_unnest(dl)
+# The names must be the platform's own, or a script written against the export file and one
+# written against the API disagree about what a variable is called.
+ok("a matrix cell becomes question.row.column", "ratings.speed.score" %in% names(flat))
+ok("with the recorded value", flat$ratings.speed.score[1] == 4)
+ok("a dynamic panel entry counts from zero, as the export does",
+   "contacts.0.who" %in% names(flat))
+ok("someone who named fewer entries gets NA, not a shifted row",
+   is.na(flat$contacts.1.who[2]))
+ok("the nested column itself is gone", !"ratings" %in% names(flat))
+ok("the plain columns are untouched", identical(as.character(flat$mood), as.character(dl$mood)))
+ok("and the fingerprint survives", !is.null(attr(flat, "sondavi_fingerprint")))
+ok("naming one column leaves the others nested",
+   is.list(sondavi_unnest(dl, columns = "ratings")$contacts))
+
+# Every name unnest produces must be one the codebook knows: that is the coupling worth a test,
+# because both sides derive it separately.
+cb_names <- cb$name[!is.na(cb$name)]
+produced <- grep("^(ratings|contacts)\\.", names(flat), value = TRUE)
+ok("every flattened name appears in the codebook", all(produced %in% cb_names))
+
+cat("\nJoining waves\n")
+waves <- sondavi_waves(con, s$id[1:2], names = c("w1", "w2"))
+ok("one row per person seen in any wave", nrow(waves) == 3)
+ok("the columns carry their wave", all(c("mood_w1", "mood_w2") %in% names(waves)))
+ok("the join key is not suffixed", "respondent_id" %in% names(waves))
+# The point of the full outer join: attrition is usually the thing being studied, so the
+# person who stopped answering must not quietly disappear from the table.
+dropped <- waves[is.na(waves$mood_w2), ]
+ok("someone who skipped the second wave is kept", nrow(dropped) == 1)
+ok("and is recognisable by their missing wave", dropped$respondent_id == "PNL-3")
+
+joined_err <- tryCatch(sondavi_waves(con, s$id[1]), error = function(e) conditionMessage(e))
+ok("one study is not a series", grepl("at least two", joined_err))
 
 cat("\n", checks - failures, "/", checks, " checks passed\n", sep = "")
 if (failures) quit(status = 1)

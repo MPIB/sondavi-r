@@ -7,15 +7,22 @@
 sondavi_codebook(con, survey_id)
 }
 \arguments{
-\item{con}{A connection from [sondavi_connect()].}
+\item{con}{A connection from \code{\link[=sondavi_connect]{sondavi_connect()}}.}
 
-\item{survey_id}{The study's id, from [sondavi_surveys()].}
+\item{survey_id}{The study's id, from \code{\link[=sondavi_surveys]{sondavi_surveys()}}.}
 }
 \value{
-A data frame with one row per variable; `value_labels` is a list
-  column of data frames with `value` and `text`.
+A data frame with one row per variable; \code{value_labels} is a list
+column of data frames with \code{value} and \code{text}.
 }
 \description{
 This is what a CSV cannot carry: the value labels and the intended type. It
 is the same metadata the SPSS and R exports are built from.
+}
+\examples{
+\dontrun{
+cb <- sondavi_codebook(con, 42)
+cb[, c("name", "label", "type")]
+cb$value_labels[[2]]          # the labels behind a categorical question
+}
 }
