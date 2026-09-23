@@ -1,0 +1,8 @@
+^\.github$
+^\.Rbuildignore$
+^.*\.Rproj$
+^\.Rproj\.user$
+^tests/run\.sh$
+^tests/fixture-server\.py$
+^tests/fixtures$
+^LICENSE\.md$
