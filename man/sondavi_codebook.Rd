@@ -19,10 +19,19 @@ column of data frames with \code{value} and \code{text}.
 This is what a CSV cannot carry: the value labels and the intended type. It
 is the same metadata the SPSS and R exports are built from.
 }
+\details{
+A matrix row the researcher marked "Reverse-scored" has \code{reverse_scored}
+\code{TRUE} and the range its answers are mirrored in: \code{reverse_min} and
+\code{reverse_max}, the smallest and largest number on the row's scale. Its
+reversed copy is (\code{reverse_min} + \code{reverse_max}) - answer, which is what
+\code{\link[=sondavi_unnest]{sondavi_unnest()}} adds as \verb{<name>_r}. Both ends are \code{NA} when the row's scale
+has no numbers: marked, but there is nothing to reverse.
+}
 \examples{
 \dontrun{
 cb <- sondavi_codebook(con, 42)
 cb[, c("name", "label", "type")]
 cb$value_labels[[2]]          # the labels behind a categorical question
+cb[cb$reverse_scored, c("name", "reverse_min", "reverse_max")]
 }
 }

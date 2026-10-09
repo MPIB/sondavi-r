@@ -24,7 +24,11 @@ sondavi_responses(
 
 \item{include_test}{Include responses collected through the test link.}
 
-\item{labels}{Apply the codebook (factors and numeric types).}
+\item{labels}{Apply the codebook: factors with their labels, numeric types,
+the question text as a \code{label} attribute, and the reversed copy \verb{<name>_r}
+of a reverse-scored item. The codebook is kept with the data, so that
+\code{\link[=sondavi_unnest]{sondavi_unnest()}} does the same for the matrix cells it spreads out.
+\code{FALSE} gives the answers exactly as stored and fetches no codebook.}
 
 \item{page_size}{Rows per request. Larger is fewer round trips.}
 
@@ -33,7 +37,8 @@ sondavi_responses(
 \value{
 A data frame (a tibble if the package is installed). The dataset
 fingerprint is attached as the attribute \code{sondavi_fingerprint}; see
-\code{\link[=sondavi_fingerprint]{sondavi_fingerprint()}}.
+\code{\link[=sondavi_fingerprint]{sondavi_fingerprint()}}. With \code{labels = TRUE} the codebook it applied is
+attached as \code{sondavi_codebook}, in the form \code{\link[=sondavi_codebook]{sondavi_codebook()}} returns.
 }
 \description{
 Walks the pages for you. With \code{labels = TRUE} (the default) the study's
@@ -46,6 +51,11 @@ responses are included} when the study saves them: someone who stopped
 halfway is a row whose \code{completed_at} is \code{NA}. \code{nrow()} is therefore not the
 number of completed participations - use
 \code{subset(d, !is.na(completed_at))} when that is what you mean.
+
+A value the codebook has no label for - an answer to an option deleted after
+people had chosen it, or a code added without a label - is kept as a factor
+level of its own, named by the value, with a warning naming the column. It
+does not become \code{NA}, which would read as "not answered".
 }
 \examples{
 \dontrun{

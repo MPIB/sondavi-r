@@ -1,3 +1,62 @@
+# sondavi 0.4.0
+
+## Reverse-scored items
+
+On the platform you can mark a matrix row as "Reverse-scored": an item worded the
+other way round within a scale. The answer is stored as given, and the platform's
+export files add a reversed copy `<name>_r` = (smallest + largest scale value) -
+answer.
+
+* `sondavi_unnest()` now adds the same column, right after the item it mirrors: a
+  number, computed from the answer as given, and `NA` for an answer off the scale
+  such as "don't know". Name and arithmetic are the platform's, so `b5.worry_r`
+  means the same in an exported file and in data read through the API.
+* `sondavi_codebook()` has three new columns: `reverse_scored`, and `reverse_min`
+  and `reverse_max`, the range the answers are mirrored in (`NA` when the row's
+  scale has no numbers).
+
+This needs a platform that sends `reverse_scored` in the codebook; with an older one
+there is simply no copy.
+
+## Matrix cells get their labels
+
+`sondavi_unnest()` now gives the columns it creates the codebook's treatment, as
+`sondavi_responses()` does for the questions at the top level: a matrix cell with
+value labels becomes a factor, a numeric one a number, and each carries its
+question text. Before, a matrix cell stayed a bare code next to a question that is a
+factor.
+
+For this, `sondavi_responses()` and `sondavi_snapshot_responses()` keep the codebook
+with the data, as the attribute `sondavi_codebook`. With `labels = FALSE` there is
+none and the cells stay as stored, as they do with
+`sondavi_unnest(d, codebook = NULL)`.
+
+## Answers without a label are kept (changes existing behaviour)
+
+A value the codebook has no label for - an answer to an option deleted after people
+had chosen it, a code added later without a label - used to become `NA` when its
+column became a factor. `NA` reads as "not answered", so the answer was lost without
+notice. It is now kept as a level of its own, named by the value, after the labelled
+levels, and a warning names the column and the values.
+
+A numeric variable holding something that is no number still has `NA` there, but now
+with a warning saying what was dropped.
+
+## Fixed
+
+* Yes/no questions arrived as factors that were entirely `NA`: the codebook writes
+  their values as `true`/`false`, and the answers were compared as `TRUE`/`FALSE`.
+* A numeric code of six digits or more (100000) did not find its label: it was
+  compared as `"1e+05"`.
+
+## On the platform's side
+
+The rows now also carry the platform's internal fields under their own names
+(`__locale`, `__randomization_order`, ...), and a question named like one of the
+row's own fields (`source`, `locale`, `completed_at`, ...) arrives as
+`<name>_answer`. The package passes both through unchanged. **Server-side change —
+your platform needs updating for it.**
+
 # sondavi 0.3.0
 
 ## Image marking questions

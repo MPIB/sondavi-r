@@ -11,11 +11,12 @@ sondavi_snapshot_responses(con, snapshot_id, labels = TRUE)
 
 \item{snapshot_id}{The id from \code{\link[=sondavi_snapshot]{sondavi_snapshot()}}.}
 
-\item{labels}{Apply the codebook.}
+\item{labels}{Apply the codebook, as in \code{\link[=sondavi_responses]{sondavi_responses()}}.}
 }
 \value{
 A data frame of the recorded responses, carrying the attributes
-\code{sondavi_snapshot}, \code{sondavi_complete} and \code{sondavi_read_as_recorded}.
+\code{sondavi_snapshot}, \code{sondavi_complete} and \code{sondavi_read_as_recorded}, and
+with \code{labels = TRUE} also \code{sondavi_codebook}.
 }
 \description{
 The \code{sondavi_complete} attribute is the point: \code{FALSE} means some of the

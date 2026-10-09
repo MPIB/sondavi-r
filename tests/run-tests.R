@@ -11,6 +11,7 @@ if (!requireNamespace("sondavi", quietly = TRUE)) {
   library(sondavi)
   # The internals the checks below reach into.
   sondavi_get <- getFromNamespace("sondavi_get", "sondavi")
+  apply_codebook <- getFromNamespace("apply_codebook", "sondavi")
 }
 
 # Der Port kommt aus tests/run.py, das einen freien waehlt: ein fester ist eine Wette auf
@@ -93,12 +94,22 @@ ok("it carries the platform's own classification", all(c("string", "categorical"
 ok("and the value labels of the categorical one",
    nrow(cb$value_labels[[which(cb$name == "mood")]]) == 3)
 
+# The API names the range a marked row is mirrored in; the copy itself is the client's to make.
+worry <- cb[cb$name == "b5.worry", ]
+calm <- cb[cb$name == "b5.calm", ]
+ok("a matrix row marked reverse-scored says so", isTRUE(worry$reverse_scored))
+ok("with the range of its scale", worry$reverse_min == 1 && worry$reverse_max == 5)
+ok("an unmarked row has neither", !calm$reverse_scored && is.na(calm$reverse_min) && is.na(calm$reverse_max))
+ok("the reversed copy is not a variable of the API", !"b5.worry_r" %in% cb$name)
+
 cat("\nResponses\n")
 d <- sondavi_responses(con, SURVEY, labels = FALSE)
 ok("every page is walked, not just the first", nrow(d) == 3)
 ok("no row is fetched twice", length(unique(d$response_id)) == 3)
 ok("the granted identifier is there", "respondent_id" %in% names(d))
 ok("the ungranted one is not", !"ip_address" %in% names(d))
+ok("the platform's internal fields come under their own names", all(d$`__locale` == "default"))
+ok("raw values fetch no codebook", is.null(attr(d, "sondavi_codebook")))
 
 cat("\nThe codebook is what makes this better than a CSV\n")
 dl <- sondavi_responses(con, SURVEY)
@@ -108,6 +119,7 @@ ok("with the real labels, not the codes",
 ok("the first answer reads as its label", as.character(dl$mood[1]) == "Good")
 ok("a numeric question is numeric", is.numeric(dl$age))
 ok("the question text rides along", attr(dl$age, "label") == "How old are you?")
+ok("the codebook it applied is kept with the data", identical(attr(dl, "sondavi_codebook")$name, cb$name))
 
 # Timestamps as timestamps. As text they are a quiet trap: comparing a character
 # column against a date returns an answer instead of an error, and sorting by it
@@ -186,7 +198,13 @@ ok("and that it was read differently than recorded",
 ok("the recorded snapshots can be listed", nrow(sondavi_snapshots(con)) >= 1)
 
 cat("\nNested answers\n")
-flat <- sondavi_unnest(dl)
+# The recording holds an answer whose option was deleted afterwards; what unnest says about it
+# is checked below, so it is collected here rather than printed.
+unnest_warnings <- character()
+flat <- withCallingHandlers(sondavi_unnest(dl), warning = function(w) {
+  unnest_warnings <<- c(unnest_warnings, conditionMessage(w))
+  invokeRestart("muffleWarning")
+})
 # The names must be the platform's own, or a script written against the export file and one
 # written against the API disagree about what a variable is called.
 ok("a matrix cell becomes question.row.column", "ratings.speed.score" %in% names(flat))
@@ -206,6 +224,89 @@ ok("naming one column leaves the others nested",
 cb_names <- cb$name[!is.na(cb$name)]
 produced <- grep("^(ratings|contacts|map|visits)\\.", names(flat), value = TRUE)
 ok("every flattened name appears in the codebook", all(produced %in% cb_names))
+ok("the internal fields pass through untouched", all(flat$`__locale` == "default"))
+ok("the codebook stays with the data", !is.null(attr(flat, "sondavi_codebook")))
+
+cat("\nMatrix cells get the codebook too\n")
+# It used to be applied before unnesting only, so a matrix cell stayed a bare code next to a
+# question that is a factor.
+ok("a matrix cell with value labels becomes a factor", is.factor(flat$b5.worry))
+ok("reading as its label", as.character(flat$b5.worry[1]) == "A little")
+ok("an off-scale option keeps its own label", as.character(flat$b5.worry[2]) == "Don't know")
+ok("a numeric cell is a number", is.numeric(flat$ratings.speed.score))
+ok("and each cell carries its question text", grepl("Speed", attr(flat$ratings.speed.score, "label")))
+
+cat("\nReverse-scored items\n")
+at <- match("b5.worry", names(flat))
+ok("the reversed copy follows its item, as in the export file", identical(names(flat)[at + 1], "b5.worry_r"))
+ok("it is a number, not a factor", is.numeric(flat$b5.worry_r))
+# Computed from the answer as given (2), not from the factor it became ("A little", code 2 by
+# accident here - which is exactly why the order matters).
+ok("min + max - answer: 2 on a 1-5 scale becomes 4", flat$b5.worry_r[1] == 4)
+ok("an answer off the scale (dk) has no reversed value", is.na(flat$b5.worry_r[2]))
+ok("its label says what it is", grepl("(reverse-scored)", attr(flat$b5.worry_r, "label"), fixed = TRUE))
+ok("an unmarked row gets no copy", !"b5.calm_r" %in% names(flat))
+replayed_flat <- suppressWarnings(sondavi_unnest(rep))
+ok("a replayed snapshot carries its codebook too", replayed_flat$b5.worry_r[3] == 1)
+raw_flat <- sondavi_unnest(dl, codebook = NULL)
+ok("codebook = NULL leaves the cells as stored",
+   identical(raw_flat$b5.worry, c("2", "dk", "2")) && !"b5.worry_r" %in% names(raw_flat))
+raw_unlabelled <- sondavi_unnest(d)
+ok("and so does unnesting data read with labels = FALSE",
+   !is.factor(raw_unlabelled$b5.worry) && !"b5.worry_r" %in% names(raw_unlabelled))
+
+cat("\nAnswers without a value label\n")
+# Matching against the labels alone turned them into NA, which reads as "not answered".
+calm_warnings <- grep("b5.calm", unnest_warnings, fixed = TRUE, value = TRUE)
+ok("are kept, named by their value", as.character(flat$b5.calm[2]) == "6")
+ok("as a level after the labelled ones",
+   identical(levels(flat$b5.calm), c("Not at all", "A little", "Somewhat", "Very", "Completely", "Don't know", "6")))
+ok("the analyst is warned once for the column, with the value",
+   length(calm_warnings) == 1 && grepl('"6"', calm_warnings, fixed = TRUE))
+ok("a column whose answers all have labels is not mentioned",
+   !any(grepl("b5.worry", unnest_warnings, fixed = TRUE)))
+
+cat("\nThe same rules on answers the recording does not have\n")
+labels_of <- function(value, text) data.frame(value = value, text = text, stringsAsFactors = FALSE)
+synthetic_cb <- data.frame(
+  name = c("q.a", "q.a_r", "consent"), label = c("Item A", "Another variable", "Do you agree?"),
+  type = c("categorical", "numeric", "categorical"), surveyjs_type = c("matrix", "text", "boolean"),
+  reverse_scored = c(TRUE, FALSE, FALSE), reverse_min = c(1, NA, NA), reverse_max = c(7, NA, NA),
+  stringsAsFactors = FALSE
+)
+synthetic_cb$value_labels <- list(
+  labels_of(as.character(1:7), paste("Level", 1:7)),
+  labels_of(character(), character()),
+  labels_of(c("true", "false"), c("Yes", "No"))
+)
+nested_in <- data.frame(id = 1:3)
+nested_in$q <- I(list(list(a = 3, a_r = 9), list(a = "7"), list(a = "0x1A")))
+synthetic_warnings <- character()
+nested_out <- withCallingHandlers(sondavi_unnest(nested_in, codebook = synthetic_cb), warning = function(w) {
+  synthetic_warnings <<- c(synthetic_warnings, conditionMessage(w))
+  invokeRestart("muffleWarning")
+})
+# The platform's naming rule: a copy never takes the name of an existing variable.
+ok("a taken name makes the copy <name>_r2",
+   identical(names(nested_out), c("id", "q.a", "q.a_r2", "q.a_r")))
+ok("and the variable that had the name keeps its values", identical(as.numeric(nested_out$q.a_r), c(9, NA, NA)))
+ok("a number given as text is still a number", nested_out$q.a_r2[2] == 1)
+# What counts as a number is PHP's is_numeric, as on the platform; as.numeric() would read 26.
+ok("hexadecimal is not", is.na(nested_out$q.a_r2[3]))
+ok("its unlabelled value is named in the warning", any(grepl('"0x1A"', synthetic_warnings, fixed = TRUE)))
+
+top_warnings <- character()
+top <- withCallingHandlers(
+  apply_codebook(data.frame(q.a = c(2, NA, 5), consent = c(TRUE, FALSE, NA), q.a_r = c("9", "dk", NA),
+                            stringsAsFactors = FALSE), synthetic_cb),
+  warning = function(w) { top_warnings <<- c(top_warnings, conditionMessage(w)); invokeRestart("muffleWarning") }
+)
+ok("a reverse-scored column at the top level gets its copy as well",
+   identical(names(top)[1:2], c("q.a", "q.a_r2")) && identical(as.numeric(top$q.a_r2), c(6, NA, 3)))
+# The codebook writes yes/no as "true"/"false"; matched as "TRUE", every one became NA.
+ok("a yes/no answer reads as its label", identical(as.character(top$consent), c("Yes", "No", NA)))
+ok("a numeric variable says which answers are no numbers",
+   any(grepl("`q.a_r`", top_warnings, fixed = TRUE) & grepl('"dk"', top_warnings, fixed = TRUE)))
 
 cat("\nImage marking\n")
 # The API sends the stored answer (image, grid, cells or pins); unnest has to write it the way

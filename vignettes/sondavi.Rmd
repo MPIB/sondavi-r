@@ -120,6 +120,30 @@ names(flat)
 
 Those are the same names the platform's own export writes, so an analysis built
 on an exported file and one built on the API agree on what a variable is called.
+The new columns get the codebook as well: a matrix cell with value labels is a
+factor, like the questions beside it.
+
+### Reverse-scored items
+
+A scale often has an item worded the other way round ("I worry a lot" among
+items about calm). Marked as "Reverse-scored" in the editor, its answer is still
+stored as given, and `sondavi_unnest()` adds the reversed copy right after it -
+the same column the platform's export file has:
+
+```{r}
+flat[, c("b5.worry", "b5.worry_r")]
+#>   b5.worry   b5.worry_r
+#> 1 A little            4
+#> 2 Don't know         NA
+```
+
+`b5.worry_r` is (smallest + largest scale value) - answer, here 6 - answer on a
+1-5 scale, computed from the answer as given. "Don't know" is not on the scale
+and has no reversed value. The range comes from the codebook:
+
+```{r}
+cb[cb$reverse_scored, c("name", "reverse_min", "reverse_max")]
+```
 
 ### Image marking
 

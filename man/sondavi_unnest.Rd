@@ -4,13 +4,18 @@
 \alias{sondavi_unnest}
 \title{Spread nested answers into one column each}
 \usage{
-sondavi_unnest(data, columns = NULL)
+sondavi_unnest(data, columns = NULL, codebook = attr(data, "sondavi_codebook"))
 }
 \arguments{
 \item{data}{The result of \code{\link[=sondavi_responses]{sondavi_responses()}} or
 \code{\link[=sondavi_snapshot_responses]{sondavi_snapshot_responses()}}.}
 
 \item{columns}{Which list columns to spread. Default: all of them.}
+
+\item{codebook}{The codebook for the new columns. Default: the one
+\code{\link[=sondavi_responses]{sondavi_responses()}} applied and kept with the data (with
+\code{labels = TRUE}). \code{NULL} leaves them exactly as stored, without reversed
+copies.}
 }
 \value{
 The data frame with each nested column replaced, in place, by its
@@ -33,6 +38,15 @@ An image marking answer becomes one column per marking type, as in the
 export: painted cells as row runs (\code{"12:31-40 13:30"} = row 12, columns 31 to
 40, and row 13, column 30), pins as \code{"x,y"} pairs. For a heatmap, use
 \code{\link[=sondavi_markings]{sondavi_markings()}} instead, on the data before unnesting.
+
+The new columns get the codebook's treatment, like the questions at the top
+level: a matrix cell with value labels becomes a factor, a numeric one a
+number, and each carries its question text as a \code{label} attribute. A matrix
+row marked "Reverse-scored" gets its reversed copy \verb{<name>_r} right after
+it, as in the platform's export file: (smallest + largest scale value) -
+answer, a number, computed from the answer as given. An answer off the scale
+(\code{"dk"}, empty) gives \code{NA} there. The name is \verb{<name>_r2}, \verb{_r3} ... if
+another variable is already called \verb{<name>_r}, the platform's rule.
 }
 \examples{
 \dontrun{
@@ -42,5 +56,8 @@ flat <- sondavi_unnest(d)
 names(flat)                    # ... "ratings.speed.score" "ratings.clarity.score"
 
 sondavi_unnest(d, columns = "ratings")   # leave the others nested
+
+# A battery with one item worded the other way round, marked in the editor:
+flat[, c("b5.worry", "b5.worry_r")]      # the answer, and 6 - answer on a 1-5 scale
 }
 }

@@ -78,6 +78,15 @@ names(flat)
 #> … "ratings.speed.score" "ratings.clarity.score" "contacts.0.who"
 ```
 
+The new columns get the codebook too: a matrix cell with value labels is a factor, like
+the questions beside it. A matrix row marked "Reverse-scored" in the editor gets its
+reversed copy right after it, as in the platform's export file — `b5.worry_r` =
+(smallest + largest scale value) − answer, a number, `NA` for an answer off the scale
+such as "don't know".
+
+A value the codebook has no label for (an answer to an option deleted later) is kept as
+a factor level of its own, named by the value, with a warning — not turned into `NA`.
+
 ## Image marking
 
 An image marking question (participants paint areas or set pins on a map or picture) arrives

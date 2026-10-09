@@ -42,6 +42,13 @@ sondavi_surveys <- function(con) {
 #' This is what a CSV cannot carry: the value labels and the intended type. It
 #' is the same metadata the SPSS and R exports are built from.
 #'
+#' A matrix row the researcher marked "Reverse-scored" has `reverse_scored`
+#' `TRUE` and the range its answers are mirrored in: `reverse_min` and
+#' `reverse_max`, the smallest and largest number on the row's scale. Its
+#' reversed copy is (`reverse_min` + `reverse_max`) - answer, which is what
+#' [sondavi_unnest()] adds as `<name>_r`. Both ends are `NA` when the row's scale
+#' has no numbers: marked, but there is nothing to reverse.
+#'
 #' @param con A connection from [sondavi_connect()].
 #' @param survey_id The study's id, from [sondavi_surveys()].
 #' @return A data frame with one row per variable; `value_labels` is a list
@@ -51,6 +58,7 @@ sondavi_surveys <- function(con) {
 #' cb <- sondavi_codebook(con, 42)
 #' cb[, c("name", "label", "type")]
 #' cb$value_labels[[2]]          # the labels behind a categorical question
+#' cb[cb$reverse_scored, c("name", "reverse_min", "reverse_max")]
 #' }
 #' @export
 sondavi_codebook <- function(con, survey_id) {
@@ -60,16 +68,24 @@ sondavi_codebook <- function(con, survey_id) {
   if (!length(vars)) {
     return(data.frame(
       name = character(), label = character(), type = character(),
-      surveyjs_type = character(), stringsAsFactors = FALSE
+      surveyjs_type = character(), reverse_scored = logical(),
+      reverse_min = numeric(), reverse_max = numeric(), stringsAsFactors = FALSE
     ))
   }
 
   out <- do.call(rbind, lapply(vars, function(v) {
+    # The API sends `reverse_scored` only for a marked row, and with null ends when the row's
+    # scale has no numbers. Three columns keep both facts: "not marked" and "marked, nothing
+    # to reverse" are different things to find out about your own questionnaire.
+    scale <- v$reverse_scored
     data.frame(
       name = v$name %||% NA_character_,
       label = v$label %||% NA_character_,
       type = v$type %||% NA_character_,
       surveyjs_type = v$surveyjs_type %||% NA_character_,
+      reverse_scored = !is.null(scale),
+      reverse_min = as.numeric(scale$min %||% NA_real_),
+      reverse_max = as.numeric(scale$max %||% NA_real_),
       stringsAsFactors = FALSE
     )
   }))
@@ -80,7 +96,7 @@ sondavi_codebook <- function(con, survey_id) {
       return(data.frame(value = character(), text = character(), stringsAsFactors = FALSE))
     }
     do.call(rbind, lapply(labs, function(l) {
-      data.frame(value = as.character(l$value), text = as.character(l$text), stringsAsFactors = FALSE)
+      data.frame(value = value_key(l$value), text = as.character(l$text), stringsAsFactors = FALSE)
     }))
   })
 
@@ -99,17 +115,27 @@ sondavi_codebook <- function(con, survey_id) {
 #' number of completed participations - use
 #' `subset(d, !is.na(completed_at))` when that is what you mean.
 #'
+#' A value the codebook has no label for - an answer to an option deleted after
+#' people had chosen it, or a code added without a label - is kept as a factor
+#' level of its own, named by the value, with a warning naming the column. It
+#' does not become `NA`, which would read as "not answered".
+#'
 #' @param con A connection from [sondavi_connect()].
 #' @param survey_id The study's id.
 #' @param since Only responses recorded at or after this time. Anything
 #'   [as.POSIXct()] understands, or an ISO-8601 string.
 #' @param include_test Include responses collected through the test link.
-#' @param labels Apply the codebook (factors and numeric types).
+#' @param labels Apply the codebook: factors with their labels, numeric types,
+#'   the question text as a `label` attribute, and the reversed copy `<name>_r`
+#'   of a reverse-scored item. The codebook is kept with the data, so that
+#'   [sondavi_unnest()] does the same for the matrix cells it spreads out.
+#'   `FALSE` gives the answers exactly as stored and fetches no codebook.
 #' @param page_size Rows per request. Larger is fewer round trips.
 #' @param max_rows Stop after this many rows. Useful while writing a script.
 #' @return A data frame (a tibble if the package is installed). The dataset
 #'   fingerprint is attached as the attribute `sondavi_fingerprint`; see
-#'   [sondavi_fingerprint()].
+#'   [sondavi_fingerprint()]. With `labels = TRUE` the codebook it applied is
+#'   attached as `sondavi_codebook`, in the form [sondavi_codebook()] returns.
 #' @examples
 #' \dontrun{
 #' d <- sondavi_responses(con, 42)
@@ -150,7 +176,13 @@ sondavi_responses <- function(con, survey_id, since = NULL, include_test = FALSE
 
   out <- rows_to_frame(flat)
   out <- parse_timestamps(out, first_meta$timezone)
-  if (labels && nrow(out)) out <- apply_codebook(out, sondavi_codebook(con, survey_id))
+  codebook <- if (labels && nrow(out)) sondavi_codebook(con, survey_id)
+  if (!is.null(codebook)) out <- apply_codebook(out, codebook)
+
+  # Kept with the data rather than fetched again: matrix rows only become columns in
+  # sondavi_unnest(), and without the codebook there they stayed bare codes next to a
+  # question that is a factor - and a reverse-scored row had nothing to mirror against.
+  attr(out, "sondavi_codebook") <- codebook
 
   # The fingerprint of the WHOLE walk, not of the first page: the rows the
   # caller actually holds are what a paper would have to name.
@@ -255,8 +287,14 @@ parse_timestamps <- function(data, timezone = NULL) {
   data
 }
 
-# The point of shipping a codebook: real factors, right types.
+# The point of shipping a codebook: real factors, right types. Runs on the top level in
+# sondavi_responses() and on the new columns in sondavi_unnest(), so a matrix cell gets the
+# same treatment as a question of its own.
 apply_codebook <- function(data, codebook) {
+  # The reversed copies first, from the answers as given: once a column is a factor its
+  # values are labels, and "Agree" has no arithmetic.
+  data <- add_reversed_copies(data, codebook)
+
   for (i in seq_len(nrow(codebook))) {
     name <- codebook$name[i]
     if (!name %in% names(data)) next
@@ -266,9 +304,9 @@ apply_codebook <- function(data, codebook) {
     type <- codebook$type[i]
 
     if (!is.null(labs) && nrow(labs)) {
-      data[[name]] <- factor(as.character(data[[name]]), levels = labs$value, labels = labs$text)
+      data[[name]] <- labelled_factor(data[[name]], labs, name)
     } else if (identical(type, "numeric")) {
-      data[[name]] <- suppressWarnings(as.numeric(data[[name]]))
+      data[[name]] <- as_numbers(data[[name]], name)
     }
 
     if (!is.na(codebook$label[i]) && nzchar(codebook$label[i])) {
@@ -276,6 +314,139 @@ apply_codebook <- function(data, codebook) {
     }
   }
   data
+}
+
+# A factor that keeps every answer. Matching against the value labels alone turned a value
+# without one - an answer to an option deleted after people had chosen it, a "don't know"
+# coded 99 and added later without a label - into NA, and an NA reads as "not answered".
+# Such a value becomes a level of its own, named by the value, after the labelled ones; the
+# analyst hears about it once per column.
+labelled_factor <- function(raw, labs, name) {
+  # Two options with the same value would make factor() fail; the first one names it, as the
+  # platform's codebook lets the first question define a shared variable.
+  labs <- labs[!duplicated(labs$value), , drop = FALSE]
+
+  key <- value_key(raw)
+  # An empty string is no answer, not an unknown one.
+  key[!is.na(key) & !nzchar(key) & !("" %in% labs$value)] <- NA
+
+  unknown <- setdiff(unique(key[!is.na(key)]), labs$value)
+  if (length(unknown)) {
+    warning(
+      "`", name, "` holds ", if (length(unknown) == 1) "a value" else "values",
+      " the codebook has no label for: ", quoted_list(unknown), ". ",
+      if (length(unknown) == 1) "It is kept as a level of its own" else "They are kept as levels of their own",
+      ", named by the value, rather than turned into NA - ",
+      "usually an option deleted after people had chosen it, or a code added without a label.",
+      call. = FALSE
+    )
+  }
+
+  factor(key, levels = c(labs$value, unknown), labels = c(labs$text, unknown))
+}
+
+# A numeric variable as numbers. What is no number ("dk" in a rating, stray text) cannot stay
+# in a numeric column, but it must not vanish into NA unannounced either.
+as_numbers <- function(raw, name) {
+  if (is.numeric(raw)) return(as.numeric(raw))
+  out <- suppressWarnings(as.numeric(raw))
+  text <- as.character(raw)
+  lost <- unique(text[is.na(out) & !is.na(raw) & nzchar(text)])
+  if (length(lost)) {
+    warning(
+      "`", name, "` is numeric in the codebook but holds answers that are no numbers: ",
+      quoted_list(lost), ". They are NA here; `labels = FALSE` gives the answers as stored.",
+      call. = FALSE
+    )
+  }
+  out
+}
+
+quoted_list <- function(values, at_most = 10) {
+  shown <- paste0('"', utils::head(values, at_most), '"', collapse = ", ")
+  if (length(values) > at_most) shown <- paste0(shown, " and ", length(values) - at_most, " more")
+  shown
+}
+
+# What an answer is compared with the value labels by, written the way the codebook writes
+# values: a number in full (as.character() makes 100000 "1e+05") and yes/no as "true"/"false"
+# (as.character() makes it "TRUE", which matched nothing - every yes/no question arrived as NA).
+value_key <- function(x) {
+  if (is.factor(x)) return(as.character(x))
+  if (is.logical(x)) return(ifelse(x, "true", "false"))
+  if (is.numeric(x)) {
+    out <- trimws(formatC(x, format = "fg", digits = 15))
+    out[is.na(x)] <- NA_character_
+    return(out)
+  }
+  as.character(x)
+}
+
+# ---- Reverse-scored items -------------------------------------------------------
+#
+# The platform stores an answer as it was given and mirrors it only when the data are read
+# (its SPECS §75): the reversed copy `<name>_r` = (smallest + largest scale value) - answer.
+# Its data files carry that column; the API does not, and names the range instead
+# (`reverse_scored: {min, max}` on the variable), so the copy is built here. Name, arithmetic
+# and what counts as a number follow the platform, so `b5.worry_r` means the same thing in an
+# exported file and in a data frame read through the API.
+
+# One entry per copy to make: list(source, name, sum, label), in codebook order.
+reversed_copies <- function(codebook) {
+  if (!nrow(codebook) || is.null(codebook$reverse_min)) return(list())
+  taken <- codebook$name
+  copies <- list()
+  for (i in which(!is.na(codebook$reverse_min) & !is.na(codebook$reverse_max))) {
+    source <- codebook$name[i]
+    # `<name>_r`, or `_r2`, `_r3` ... when another variable already has that name.
+    name <- paste0(source, "_r")
+    n <- 2L
+    while (name %in% taken) {
+      name <- paste0(source, "_r", n)
+      n <- n + 1L
+    }
+    taken <- c(taken, name)
+    copies[[length(copies) + 1L]] <- list(
+      source = source, name = name,
+      sum = codebook$reverse_min[i] + codebook$reverse_max[i], label = codebook$label[i]
+    )
+  }
+  copies
+}
+
+# Each copy right after the column it mirrors, as the export file has it. A numeric column,
+# whatever the source becomes afterwards: it is for computing a scale score with.
+add_reversed_copies <- function(data, codebook) {
+  for (copy in reversed_copies(codebook)) {
+    if (!copy$source %in% names(data) || copy$name %in% names(data)) next
+    raw <- data[[copy$source]]
+    if (is.list(raw)) next   # a nested answer has no single value to mirror
+    value <- reversed_values(raw, copy$sum)
+    if (!is.na(copy$label) && nzchar(copy$label)) attr(value, "label") <- paste(copy$label, "(reverse-scored)")
+    data <- insert_after(data, copy$source, copy$name, value)
+  }
+  data
+}
+
+# What PHP's is_numeric() accepts, which is what the platform mirrors: " 4" is a number,
+# "0x1A" and "Inf" are not (as.numeric() would take both).
+NUMBER_PATTERN <- "^\\s*[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?\\s*$"
+
+# Only a number is on the scale. "dk", an empty answer, yes/no and anything else stay NA.
+reversed_values <- function(raw, sum) {
+  if (is.numeric(raw)) return(sum - as.numeric(raw))
+  out <- rep(NA_real_, length(raw))
+  if (!is.character(raw)) return(out)
+  is_number <- !is.na(raw) & grepl(NUMBER_PATTERN, raw)
+  out[is_number] <- sum - as.numeric(raw[is_number])
+  out
+}
+
+insert_after <- function(data, after, name, value) {
+  at <- match(after, names(data))
+  data[[name]] <- value
+  last <- ncol(data)
+  data[, c(seq_len(at), last, setdiff(seq_len(last - 1L), seq_len(at))), drop = FALSE]
 }
 
 # -- Citable datasets ------------
@@ -333,9 +504,10 @@ sondavi_snapshots <- function(con) {
 #'
 #' @param con A connection from [sondavi_connect()].
 #' @param snapshot_id The id from [sondavi_snapshot()].
-#' @param labels Apply the codebook.
+#' @param labels Apply the codebook, as in [sondavi_responses()].
 #' @return A data frame of the recorded responses, carrying the attributes
-#'   `sondavi_snapshot`, `sondavi_complete` and `sondavi_read_as_recorded`.
+#'   `sondavi_snapshot`, `sondavi_complete` and `sondavi_read_as_recorded`, and
+#'   with `labels = TRUE` also `sondavi_codebook`.
 #' @export
 sondavi_snapshot_responses <- function(con, snapshot_id, labels = TRUE) {
   body <- sondavi_get(con, paste0("snapshots/", snapshot_id, "/responses"))
@@ -343,7 +515,10 @@ sondavi_snapshot_responses <- function(con, snapshot_id, labels = TRUE) {
   out <- rows_to_frame(body$data)
   out <- parse_timestamps(out, body$meta$timezone)
   meta <- body$meta$snapshot
-  if (labels && nrow(out)) out <- apply_codebook(out, sondavi_codebook(con, meta$survey_id))
+  codebook <- if (labels && nrow(out)) sondavi_codebook(con, meta$survey_id)
+  if (!is.null(codebook)) out <- apply_codebook(out, codebook)
+  # As in sondavi_responses(): what sondavi_unnest() labels the matrix cells with.
+  attr(out, "sondavi_codebook") <- codebook
 
   attr(out, "sondavi_snapshot") <- snapshot_frame(meta)
   attr(out, "sondavi_complete") <- isTRUE(meta$complete)
@@ -413,9 +588,22 @@ snapshot_frame <- function(s) {
 #' 40, and row 13, column 30), pins as `"x,y"` pairs. For a heatmap, use
 #' [sondavi_markings()] instead, on the data before unnesting.
 #'
+#' The new columns get the codebook's treatment, like the questions at the top
+#' level: a matrix cell with value labels becomes a factor, a numeric one a
+#' number, and each carries its question text as a `label` attribute. A matrix
+#' row marked "Reverse-scored" gets its reversed copy `<name>_r` right after
+#' it, as in the platform's export file: (smallest + largest scale value) -
+#' answer, a number, computed from the answer as given. An answer off the scale
+#' (`"dk"`, empty) gives `NA` there. The name is `<name>_r2`, `_r3` ... if
+#' another variable is already called `<name>_r`, the platform's rule.
+#'
 #' @param data The result of [sondavi_responses()] or
 #'   [sondavi_snapshot_responses()].
 #' @param columns Which list columns to spread. Default: all of them.
+#' @param codebook The codebook for the new columns. Default: the one
+#'   [sondavi_responses()] applied and kept with the data (with
+#'   `labels = TRUE`). `NULL` leaves them exactly as stored, without reversed
+#'   copies.
 #' @return The data frame with each nested column replaced, in place, by its
 #'   flat columns. Attributes such as the fingerprint are kept.
 #' @examples
@@ -426,9 +614,12 @@ snapshot_frame <- function(s) {
 #' names(flat)                    # ... "ratings.speed.score" "ratings.clarity.score"
 #'
 #' sondavi_unnest(d, columns = "ratings")   # leave the others nested
+#'
+#' # A battery with one item worded the other way round, marked in the editor:
+#' flat[, c("b5.worry", "b5.worry_r")]      # the answer, and 6 - answer on a 1-5 scale
 #' }
 #' @export
-sondavi_unnest <- function(data, columns = NULL) {
+sondavi_unnest <- function(data, columns = NULL, codebook = attr(data, "sondavi_codebook")) {
   nested <- names(data)[vapply(data, function(x) is.list(x) && !is.data.frame(x), logical(1))]
   targets <- if (is.null(columns)) nested else intersect(columns, nested)
 
@@ -442,6 +633,11 @@ sondavi_unnest <- function(data, columns = NULL) {
     # union of keys decides the columns, a missing one becomes NA rather than
     # shifting a row, and a leaf that is itself several values stays a list.
     spread <- rows_to_frame(lapply(out[[column]], function(v) flatten_answer(v, column)))
+
+    # The codebook used to be applied before unnesting only, so a matrix cell stayed a
+    # bare code next to a question that is a factor. Now the new columns get the same
+    # treatment - reversed copies from the raw answers first, then factors and types.
+    if (!is.null(codebook) && ncol(spread)) spread <- apply_codebook(spread, codebook)
 
     at <- match(column, names(out))
     before <- if (at > 1) out[, seq_len(at - 1), drop = FALSE] else out[, 0, drop = FALSE]
