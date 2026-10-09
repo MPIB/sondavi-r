@@ -223,7 +223,10 @@ ok("naming one column leaves the others nested",
 # because both sides derive it separately.
 cb_names <- cb$name[!is.na(cb$name)]
 produced <- grep("^(ratings|contacts|map|visits)\\.", names(flat), value = TRUE)
-ok("every flattened name appears in the codebook", all(produced %in% cb_names))
+# A reversed copy is not a variable of the API's codebook; it is built from its item's row.
+copies <- paste0(cb$name[cb$reverse_scored & !is.na(cb$reverse_min)], "_r")
+ok("every flattened name appears in the codebook (a reversed copy through its item)",
+   all(produced %in% c(cb_names, copies)))
 ok("the internal fields pass through untouched", all(flat$`__locale` == "default"))
 ok("the codebook stays with the data", !is.null(attr(flat, "sondavi_codebook")))
 
@@ -254,6 +257,55 @@ ok("codebook = NULL leaves the cells as stored",
 raw_unlabelled <- sondavi_unnest(d)
 ok("and so does unnesting data read with labels = FALSE",
    !is.factor(raw_unlabelled$b5.worry) && !"b5.worry_r" %in% names(raw_unlabelled))
+ok("a reverse-scored row of a multi-select matrix gets its copy as well",
+   identical(names(flat)[match("ratings.clarity.score", names(flat)) + 1], "ratings.clarity.score_r") &&
+   flat$ratings.clarity.score_r[1] == 1)
+
+cat("\nThe reversed copies are the platform's own\n")
+# The platform's "JSON (flat)" export of the same study, recorded next to the API answers
+# (clients/fixtures-aufzeichnen.sh). The package builds `_r` itself from the codebook; this
+# checks that it builds the same columns with the same values, rather than asserting it.
+FIXTURES <- local({
+  script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))[1]
+  file.path(dirname(normalizePath(script)), "fixtures")
+})
+exported <- jsonlite::fromJSON(file.path(FIXTURES, "export_flat.json"), simplifyVector = FALSE)
+export_copies <- grep("_r$", names(exported[[1]]), value = TRUE)
+# The snapshot replay holds all three recorded rows with their real ids.
+built <- replayed_flat
+ok("the export file has reversed copies to compare with", length(export_copies) >= 2)
+ok("the package builds exactly the export's reversed columns",
+   setequal(export_copies, grep("_r$", names(built), value = TRUE)))
+same_values <- vapply(export_copies, function(col) {
+  want <- vapply(exported, function(r) if (is.null(r[[col]]) || r[[col]] == "") NA_real_ else as.numeric(r[[col]]), numeric(1))
+  ids <- vapply(exported, function(r) as.numeric(r$response_id), numeric(1))
+  got <- built[[col]][match(ids, built$response_id)]
+  identical(as.numeric(got), want)
+}, logical(1))
+ok("with the export's values, row by row (\"dk\" empty in both)", all(same_values))
+
+cat("\nScale scores\n")
+# as.numeric() on a factor is the position of the level: "Don't know", the sixth option of
+# b5.worry, becomes 6. The scale functions read the numbers from the codebook instead.
+scale_items <- c("b5.calm", "b5.worry")
+it <- sondavi_items(flat, scale_items)
+ok("the items come as numbers, a reverse-scored one under its copy's name",
+   identical(names(it), c("b5.calm", "b5.worry_r")) && all(vapply(it, is.numeric, logical(1))))
+ok("reversed from the answer: 2 becomes 4", it$b5.worry_r[1] == 4 && it$b5.calm[1] == 4)
+ok("\"Don't know\" is no number, not 6", as.numeric(flat$b5.worry[2]) == 6 && is.na(it$b5.worry_r[2]))
+ok("an answer without a label keeps its value (6 for a deleted option)", it$b5.calm[2] == 6)
+ok("reverse = FALSE gives the item as answered",
+   identical(names(sondavi_items(flat, scale_items, reverse = FALSE)), scale_items) &&
+   sondavi_items(flat, scale_items, reverse = FALSE)$b5.worry[1] == 2)
+ok("the score is the mean of the items", sondavi_scale(flat, scale_items)[1] == 4)
+ok("by default every item has to be answered", is.na(sondavi_scale(flat, scale_items)[2]))
+ok("min_items allows gaps on purpose", sondavi_scale(flat, scale_items, min_items = 1)[2] == 6)
+ok("data read with labels = FALSE give the same numbers with the codebook passed",
+   isTRUE(all.equal(sondavi_items(raw_unlabelled, scale_items, codebook = cb), it)))
+ok("without a codebook it says how to get one",
+   inherits(tryCatch(sondavi_items(raw_unlabelled, scale_items), error = function(e) e), "error") &&
+   grepl("sondavi_codebook", tryCatch(sondavi_items(raw_unlabelled, scale_items), error = conditionMessage)))
+ok("an unknown column is named", grepl("b5.nope", tryCatch(sondavi_items(flat, "b5.nope"), error = conditionMessage)))
 
 cat("\nAnswers without a value label\n")
 # Matching against the labels alone turned them into NA, which reads as "not answered".

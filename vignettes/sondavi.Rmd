@@ -145,6 +145,25 @@ and has no reversed value. The range comes from the codebook:
 cb[cb$reverse_scored, c("name", "reverse_min", "reverse_max")]
 ```
 
+### Scale scores
+
+For arithmetic the items need their numbers, not their labels. `as.numeric()` on
+a factor gives the position of the level - "Don't know", the sixth option, would
+become 6. `sondavi_scale()` takes the numbers from the codebook and uses the
+reversed copy for a reverse-scored item, so the items are named as in the
+questionnaire:
+
+```{r}
+flat$b5_score <- sondavi_scale(flat, c("b5.calm", "b5.worry"))
+sondavi_items(flat, c("b5.calm", "b5.worry"))    # the numbers behind it
+#>   b5.calm b5.worry_r
+#> 1       4          4
+#> 2       6         NA
+```
+
+The score is `NA` unless every item has a number; `min_items` allows gaps on
+purpose. `sondavi_items()` is what `cor()` or `psych::alpha()` want.
+
 ### Image marking
 
 An image marking question stores the image, the grid and the painted cells or

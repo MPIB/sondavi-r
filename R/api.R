@@ -449,6 +449,107 @@ insert_after <- function(data, after, name, value) {
   data[, c(seq_len(at), last, setdiff(seq_len(last - 1L), seq_len(at))), drop = FALSE]
 }
 
+#' The items of a scale as numbers, and the scale score
+#'
+#' A scale is computed from numbers, but [sondavi_responses()] hands a choice
+#' item out as a factor with its labels, which is what a table or a plot needs.
+#' `as.numeric()` on such a factor returns the position of the level, not the
+#' answer: on a 1-5 scale with "Don't know" as a sixth option, "Don't know"
+#' becomes 6 and the score is wrong without a warning. These two functions take
+#' the numbers from the codebook instead.
+#'
+#' `sondavi_items()` returns the items as a data frame of numbers, ready for
+#' `cor()`, `lm()` or `psych::alpha()`. An item the researcher marked
+#' "Reverse-scored" in the editor comes reversed - (smallest + largest scale
+#' value) - answer - under the name of its reversed copy (`b5.worry_r`), so you
+#' name the items of a scale as they are called in the questionnaire and do not
+#' need to remember which of them are worded the other way round. An answer that
+#' is no number ("Don't know" coded `dk`) is `NA`.
+#'
+#' `sondavi_scale()` is the mean of those numbers per row. It is `NA` for a row
+#' with fewer than `min_items` numbers - by default every item has to be
+#' answered, so a mean over fewer items never happens unnoticed. Lower
+#' `min_items` to allow gaps, e.g. `min_items = 3` for three of four.
+#'
+#' @param data A data frame from [sondavi_unnest()] (a matrix row is a column of
+#'   its own there) or [sondavi_responses()].
+#' @param items Column names of the items, as in the questionnaire.
+#' @param reverse `FALSE` gives every item as answered, also the reverse-scored
+#'   ones.
+#' @param min_items How many of the items a row needs to get a score.
+#' @param codebook The study's codebook. The data carry it, but some steps drop
+#'   it - `subset()` on a plain data frame, for one; then pass
+#'   `sondavi_codebook(con, id)`.
+#' @return `sondavi_items()`: a data frame with one numeric column per item.
+#'   `sondavi_scale()`: a numeric vector, one score per row.
+#' @examples
+#' \dontrun{
+#' flat <- sondavi_unnest(sondavi_responses(con, 42))
+#' items <- c("b5.calm", "b5.worry", "b5.rested")   # b5.worry is reverse-scored
+#' psych::alpha(sondavi_items(flat, items))
+#' flat$b5_score <- sondavi_scale(flat, items)
+#' }
+#' @export
+sondavi_items <- function(data, items, reverse = TRUE, codebook = attr(data, "sondavi_codebook")) {
+  if (is.null(codebook)) {
+    stop("No codebook to read the items' numbers from. Some steps drop it from the data ",
+         "(`subset()` on a plain data frame, for one); pass `codebook = sondavi_codebook(con, id)`.",
+         call. = FALSE)
+  }
+  missing <- setdiff(items, names(data))
+  if (length(missing)) stop("Not a column of the data: ", quoted_list(missing), ".", call. = FALSE)
+
+  copies <- reversed_copies(codebook)
+  names(copies) <- vapply(copies, function(copy) copy$source, character(1))
+
+  out <- list()
+  for (item in items) {
+    value <- item_numbers(data[[item]], item, codebook)
+    label <- codebook$label[match(item, codebook$name)]
+    copy <- copies[[item]]
+    if (reverse && !is.null(copy)) {
+      value <- copy$sum - value
+      item <- copy$name
+      if (!is.na(label)) label <- paste(label, "(reverse-scored)")
+    }
+    if (!is.na(label) && nzchar(label)) attr(value, "label") <- label
+    out[[item]] <- value
+  }
+  structure(out, class = "data.frame", row.names = seq_len(nrow(data)))
+}
+
+#' @rdname sondavi_items
+#' @export
+sondavi_scale <- function(data, items, min_items = length(items), codebook = attr(data, "sondavi_codebook")) {
+  if (min_items < 1) stop("`min_items` has to be at least 1.", call. = FALSE)
+  values <- sondavi_items(data, items, codebook = codebook)
+  score <- rowMeans(values, na.rm = TRUE)
+  score[rowSums(!is.na(values)) < min_items] <- NA_real_
+  score
+}
+
+# The stored numbers of one column, whatever form it arrived in: a factor gets its codes back
+# through the codebook's value labels (a level the codebook has no label for is named by its
+# value, see labelled_factor()), anything else is read as the answer it is. What is no number
+# is NA - the same rule as the reversed copies.
+item_numbers <- function(x, name, codebook) {
+  if (is.numeric(x)) return(as.numeric(x))
+  key <- value_key(x)
+  at <- match(name, codebook$name)
+  if (is.factor(x) && !is.na(at)) {
+    labs <- codebook$value_labels[[at]]
+    if (!is.null(labs) && nrow(labs)) {
+      labs <- labs[!duplicated(labs$value), , drop = FALSE]
+      hit <- match(key, labs$text)
+      key[!is.na(hit)] <- labs$value[hit[!is.na(hit)]]
+    }
+  }
+  out <- rep(NA_real_, length(key))
+  is_number <- !is.na(key) & grepl(NUMBER_PATTERN, key)
+  out[is_number] <- as.numeric(key[is_number])
+  out
+}
+
 # -- Citable datasets ------------
 
 #' Record the exact set of responses behind a result

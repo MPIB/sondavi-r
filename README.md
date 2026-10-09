@@ -50,6 +50,7 @@ at most 90 days.
 | `sondavi_snapshot_responses(con, snapshot_id)` | replay one |
 | `sondavi_fingerprint(d)` | the line that belongs in your paper |
 | `sondavi_unnest(d)` | spread matrices and dynamic panels into one column each |
+| `sondavi_items(flat, items)` / `sondavi_scale(flat, items)` | the items of a scale as numbers, and the scale score |
 | `sondavi_markings(d)` | image marking answers as one row per cell or pin, for a heatmap |
 | `sondavi_waves(con, ids)` | join the waves of a study series by respondent |
 
@@ -86,6 +87,25 @@ such as "don't know".
 
 A value the codebook has no label for (an answer to an option deleted later) is kept as
 a factor level of its own, named by the value, with a warning — not turned into `NA`.
+
+## Scale scores
+
+A factor is right for a table, wrong for arithmetic: `as.numeric()` gives the position of
+the level, not the answer — on a 1–5 scale with "Don't know" as a sixth option, "Don't
+know" becomes 6, and the score is off without a warning. Name the items as they are called
+in the questionnaire instead; the package takes their numbers from the codebook and uses
+the reversed copy for every item marked "Reverse-scored", so you need not remember which
+ones are worded the other way round:
+
+```r
+items <- c("b5.calm", "b5.worry", "b5.rested")         # b5.worry is reverse-scored
+flat$b5_score <- sondavi_scale(flat, items)             # NA unless all three are answered
+flat$b5_score <- sondavi_scale(flat, items, min_items = 2)   # allow one gap, on purpose
+psych::alpha(sondavi_items(flat, items))                # b5.calm, b5.worry_r, b5.rested
+```
+
+"Don't know" and other answers that are no number count as missing. By default every item
+has to be answered, so a mean over fewer items never happens unnoticed.
 
 ## Image marking
 

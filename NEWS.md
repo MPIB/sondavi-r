@@ -1,3 +1,18 @@
+# sondavi 0.5.0
+
+## Scale scores
+
+* `sondavi_scale(flat, items)` is the scale score per row, `sondavi_items(flat, items)`
+  the items as numbers (for `cor()`, `lm()`, `psych::alpha()`). Name the items as in the
+  questionnaire: a reverse-scored one is taken from its reversed copy by itself.
+* They read the numbers from the codebook. `as.numeric()` on the factors
+  `sondavi_responses()` returns gives the position of the level: a "Don't know" offered
+  as sixth option became 6.
+* By default every item has to be answered; `min_items` allows gaps on purpose.
+
+The tests now also compare the reversed copies with the platform's own export file of the
+same study, value by value.
+
 # sondavi 0.4.0
 
 ## Reverse-scored items
