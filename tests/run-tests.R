@@ -73,7 +73,7 @@ fails_with("a study out of scope says so without guessing", "not given access",
 
 cat("\nListing and codebook\n")
 s <- sondavi_surveys(con)
-ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 2)
+ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 3)
 # Not a written-down id: `clients/fixtures-aufzeichnen.sh` records a fresh study each
 # time, so a constant here would fail the suite for a reason that has nothing to do
 # with the client.
@@ -392,6 +392,72 @@ ok("one question can be asked for", all(sondavi_markings(dl, columns = "visits")
 none <- sondavi_markings(dl[, setdiff(names(dl), c("map", "visits"))])
 ok("a study without image marking gives an empty table, same columns",
    nrow(none) == 0 && identical(names(none), names(m)))
+
+cat("\nAI interviews\n")
+# An interview question arrives as the whole conversation (mode, status, turns, messages, ...).
+# unnest writes the export's columns - the ones the codebook lists - not a column per message;
+# sondavi_conversations() is the conversation as a long table. The study is a real recording.
+di <- sondavi_responses(con, s$id[3])
+fi <- sondavi_unnest(di)
+ok("an interview question becomes the export's columns",
+   all(c("talk.status", "talk.turns", "talk.answered", "talk.skipped", "talk.summary", "chat.status", "chat.turns") %in% names(fi)))
+ok("and nothing of the stored conversation leaks out as columns",
+   !any(grepl("^(talk|chat)\\.(mode|messages|questionStatus|microNarrative)", names(fi))))
+ok("every column the codebook names for it is there",
+   all(grep("^(talk|chat)\\.", attr(di, "sondavi_codebook")$name, value = TRUE) %in% names(fi)))
+ok("a free interview has no counts of questions", !any(c("chat.answered", "chat.skipped") %in% names(fi)))
+ok("how it ended is a factor with the codebook's labels",
+   is.factor(fi$talk.status) && identical(as.character(fi$talk.status[1:2]), c("Completed", "Ended early after technical problems")))
+ok("turns and question counts are numbers",
+   identical(as.numeric(fi$talk.turns[1:2]), c(4, 1)) && identical(as.numeric(fi$talk.answered[1:2]), c(2, 1)) &&
+   identical(as.numeric(fi$talk.skipped[1:2]), c(0, 0)))
+ok("the chosen summary is there, NA where none was chosen",
+   startsWith(fi$talk.summary[1], "I write software") && is.na(fi$talk.summary[2]))
+ok("someone who never met the question has NA", is.na(fi$chat.status[2]) && is.na(fi$talk.status[3]))
+ok("the whole-survey interview's probing stays readable",
+   isTRUE(fi$interview_probing.job.was_probed[3]) && grepl("^I: What is your job", fi$interview_probing.job.transcript[3]))
+
+talk <- sondavi_conversations(di)
+ok("the conversations: one row per message", nrow(talk) == 9 + 7 + 2)
+ok("with their columns", identical(names(talk), c("response_id", "respondent_id", "completed_at", "question", "mode",
+                                                  "message", "role", "answer", "text", "input", "at", "state")))
+one <- talk[talk$question == "talk" & talk$respondent_id == "PNL-1", ]
+ok("in the order of the conversation, interviewer first", identical(one$message, seq_len(9)) && one$role[1] == "interviewer")
+ok("the respondent's answers are counted", identical(one$answer[one$role == "respondent"], 1:4) && all(is.na(one$answer[one$role == "interviewer"])))
+ok("an answer says whether it was typed or spoken",
+   identical(talk$input[talk$question == "chat" & talk$role == "respondent"], c("text", "voice", "text")))
+ok("each message has its time, in UTC", inherits(talk$at, "POSIXct") && !anyNA(talk$at) && attr(talk$at, "tzone") == "UTC")
+ok("and its words", grepl("^TEST I write software", one$text[2]))
+ok("an interview that ended early keeps what was said", sum(talk$respondent_id == "PNL-2") == 2)
+ok("one question can be asked for", all(sondavi_conversations(di, columns = "chat")$question == "chat"))
+# What the recording does not have: a flow interview, a summary in a free one, a blank choice.
+flow <- list(mode = "flow", status = "active", turns = 1L, messages = list(
+  list(role = "assistant", text = "Hi", at = "2026-10-15T20:00:00.000000Z", state = "intro"),
+  list(role = "user", text = "Hello", at = "2026-10-15T20:00:05.500000Z", input = "voice")),
+  statePath = list(list(state = "intro", via = "start", turn = 0L)))
+free <- list(mode = "free", status = "completed", turns = 2L, messages = list(),
+             microNarrative = list(status = "chosen", options = list("  "), chosenIndex = 0L, chosen = "  "))
+own <- data.frame(response_id = 1:2)
+own$q <- I(list(flow, free))
+of <- sondavi_unnest(own, codebook = NULL)
+ok("a flow interview has no counts of questions and no summary", !any(c("q.answered", "q.skipped") %in% names(of)) &&
+   identical(of$q.status, c("active", "completed")))
+ok("a free interview offering summaries has the summary column; a blank choice is none",
+   "q.summary" %in% names(of) && all(is.na(of$q.summary)))
+ok("an interview without summaries gets no summary column", !"q.summary" %in% names(sondavi_unnest(own[1, ], codebook = NULL)))
+covered <- list(mode = "state", status = "completed", turns = 1L, messages = list(), questionStatus = list(
+  list(id = "a", status = "answered"), list(id = "b", status = "skipped_anticipated"), list(id = "c", status = "pending")))
+cv <- data.frame(response_id = 3L)
+cv$q <- I(list(covered))
+cf <- sondavi_unnest(cv, codebook = NULL)
+ok("a question already covered by an earlier answer counts as skipped, an open one as neither",
+   cf$q.answered == 1 && cf$q.skipped == 1)
+oc <- sondavi_conversations(own)
+ok("a flow interview's messages say in which stage the interviewer was", identical(oc$state, c("intro", NA)))
+ok("time to the second, fractions kept", abs(as.numeric(difftime(oc$at[2], oc$at[1], units = "secs")) - 5.5) < 1e-6)
+ok("an interview without messages contributes no rows", all(oc$response_id == 1))
+ok("a study without interview questions gives an empty table, same columns",
+   nrow(sondavi_conversations(dl)) == 0 && identical(names(sondavi_conversations(dl)), names(talk)))
 
 cat("\nJoining waves\n")
 waves <- sondavi_waves(con, s$id[1:2], names = c("w1", "w2"))

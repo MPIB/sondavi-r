@@ -760,6 +760,8 @@ flatten_answer <- function(value, prefix) {
   # An image marking is one answer with its own column rule, not a tree of fields:
   # the export writes one column per marking type, and so does this.
   if (is_image_marking(value)) return(image_marking_columns(value, prefix))
+  # So is an AI interview: the export's columns, not one per message (see sondavi_conversations()).
+  if (is_interview_answer(value)) return(interview_columns(value, prefix))
   if (!is.list(value)) {
     leaf <- list(value)
     names(leaf) <- prefix
@@ -950,6 +952,141 @@ empty_markings <- function(has_respondent) {
   lead$completed_at <- as.POSIXct(character())
   lead$question <- character()
   cbind(lead, empty_marks())
+}
+
+# ---- AI interview question ----------------------------------------------------
+#
+# The stored answer of an interview question is the whole conversation:
+#   list(mode = "free" | "state" | "flow", status, turns,
+#        messages = list(list(role = "assistant" | "user", text, at, input?, state?), ...),
+#        questionStatus?, statePath?, microNarrative?, voiceConsent?, ...)
+# sondavi_unnest() writes the columns the platform's export file and codebook have
+# (App\Support\LlmInterviewAnswer); the conversation itself is the long table of
+# sondavi_conversations().
+
+is_interview_answer <- function(value) {
+  is.list(value) && !is.null(names(value)) &&
+    all(c("mode", "status", "turns", "messages") %in% names(value))
+}
+
+interview_columns <- function(value, prefix) {
+  out <- list(as.character(value$status %||% NA_character_), as.integer(value$turns %||% 0L))
+  names(out) <- paste0(prefix, c(".status", ".turns"))
+  # Only an interview with a list of questions has these; elsewhere there is no column
+  # rather than a 0 of nothing - the export's rule.
+  if (identical(value$mode, "state")) {
+    statuses <- vapply(value$questionStatus %||% list(),
+                       function(q) as.character(q$status %||% ""), character(1))
+    out[[paste0(prefix, ".answered")]] <- sum(statuses == "answered")
+    out[[paste0(prefix, ".skipped")]] <- sum(statuses == "skipped_anticipated")
+  }
+  # Only when the interview offers summaries; NA when none was chosen.
+  if (is.list(value$microNarrative)) {
+    chosen <- value$microNarrative$chosen
+    ok <- is.character(chosen) && length(chosen) == 1 && nzchar(trimws(chosen))
+    out[[paste0(prefix, ".summary")]] <- if (ok) chosen else NA_character_
+  }
+  out
+}
+
+#' The conversations of AI interview questions, one row per message
+#'
+#' An interview question arrives as its stored answer: the whole conversation,
+#' with how it ended and, where the interview offers one, the summary the
+#' respondent chose. [sondavi_unnest()] turns that into the export's columns
+#' (`<question>.status`, `.turns`, `.answered`, `.skipped`, `.summary`); this
+#' turns the conversation itself into a long table - the shape for coding
+#' answers, counting words or measuring how long people took.
+#'
+#' Call it on the data before [sondavi_unnest()], which replaces the
+#' conversation by those columns.
+#'
+#' @param data The result of [sondavi_responses()] or
+#'   [sondavi_snapshot_responses()], before [sondavi_unnest()].
+#' @param columns Which questions. Default: every interview question found.
+#' @return A data frame with `response_id`, `respondent_id` (when the data has
+#'   it), `completed_at`, `question`, `mode` (free, state or flow), `message`
+#'   (1, 2, ... in the order of the conversation), `role` ("interviewer" or
+#'   "respondent"), `answer` (the respondent's 1st, 2nd ... answer; `NA` for
+#'   the interviewer), `text`, `input` ("text" or "voice", for answers), `at`
+#'   (when it was written, UTC) and `state` (the stage of a flow interview the
+#'   interviewer was in; `NA` otherwise). People who never started the
+#'   interview contribute no rows.
+#' @examples
+#' \dontrun{
+#' d <- sondavi_responses(con, 42)
+#' talk <- sondavi_conversations(d)
+#' said <- subset(talk, role == "respondent")
+#' tapply(said$text, said$response_id, paste, collapse = " ")   # all a person said
+#' table(said$input)                                            # typed or spoken
+#' }
+#' @export
+sondavi_conversations <- function(data, columns = NULL) {
+  found <- names(data)[vapply(data, function(x) {
+    is.list(x) && !is.data.frame(x) && any(vapply(x, is_interview_answer, logical(1)))
+  }, logical(1))]
+  targets <- if (is.null(columns)) found else intersect(columns, found)
+
+  has_respondent <- "respondent_id" %in% names(data)
+  rows <- list()
+
+  for (question in targets) {
+    for (i in seq_len(nrow(data))) {
+      answer <- data[[question]][[i]]
+      if (!is_interview_answer(answer)) next
+      said <- conversation_rows(answer)
+      if (!nrow(said)) next
+      lead <- data.frame(response_id = rep(data$response_id[i], nrow(said)))
+      if (has_respondent) lead$respondent_id <- rep(data$respondent_id[i], nrow(said))
+      lead$completed_at <- rep(data$completed_at[i], nrow(said))
+      lead$question <- question
+      lead$mode <- as.character(answer$mode)
+      rows[[length(rows) + 1L]] <- cbind(lead, said)
+    }
+  }
+
+  out <- if (length(rows)) do.call(rbind, rows) else empty_conversations(has_respondent)
+  rownames(out) <- NULL
+  if (requireNamespace("tibble", quietly = TRUE)) out <- tibble::as_tibble(out)
+  out
+}
+
+conversation_rows <- function(answer) {
+  messages <- Filter(is.list, answer$messages %||% list())
+  if (!length(messages)) return(empty_messages())
+  text_of <- function(m, key) {
+    v <- m[[key]]
+    if (is.null(v) || !length(v)) NA_character_ else as.character(v[[1]])
+  }
+  role <- vapply(messages, text_of, character(1), key = "role")
+  role <- ifelse(role == "assistant", "interviewer", ifelse(role == "user", "respondent", role))
+  given <- cumsum(role == "respondent")
+  at <- vapply(messages, text_of, character(1), key = "at")
+  data.frame(
+    message = seq_along(messages),
+    role = role,
+    answer = ifelse(role == "respondent", given, NA_integer_),
+    text = vapply(messages, text_of, character(1), key = "text"),
+    input = vapply(messages, text_of, character(1), key = "input"),
+    at = as.POSIXct(sub("Z$", "", at), format = "%Y-%m-%dT%H:%M:%OS", tz = "UTC"),
+    state = vapply(messages, text_of, character(1), key = "state"),
+    stringsAsFactors = FALSE
+  )
+}
+
+empty_messages <- function() {
+  data.frame(message = integer(), role = character(), answer = integer(), text = character(),
+             input = character(), at = as.POSIXct(character(), tz = "UTC"), state = character(),
+             stringsAsFactors = FALSE)
+}
+
+empty_conversations <- function(has_respondent) {
+  lead <- data.frame(response_id = integer())
+  if (has_respondent) lead$respondent_id <- character()
+  lead$completed_at <- as.POSIXct(character())
+  lead$question <- character()
+  lead$mode <- character()
+  cbind(lead, empty_messages())
 }
 
 #' Join the waves of a study series into one wide table

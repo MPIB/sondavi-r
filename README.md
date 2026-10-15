@@ -52,6 +52,7 @@ at most 90 days.
 | `sondavi_unnest(d)` | spread matrices and dynamic panels into one column each |
 | `sondavi_items(flat, items)` / `sondavi_scale(flat, items)` | the items of a scale as numbers, and the scale score |
 | `sondavi_markings(d)` | image marking answers as one row per cell or pin, for a heatmap |
+| `sondavi_conversations(d)` | AI interview questions as one row per message |
 | `sondavi_waves(con, ids)` | join the waves of a study series by respondent |
 
 `sondavi_responses()` applies the codebook by default, so a categorical question arrives as
@@ -122,6 +123,33 @@ One row per painted cell or pin, with its position between 0 and 1 (`x_norm`, `y
 pixels of the original image (`x_px`, `y_px`) — the same table as the platform's
 image-markings export. `sondavi_unnest()` writes these questions the way the CSV export does:
 one column per marking type, cells as row runs (`"2:3-5 3:4"`), pins as `"x,y"` pairs.
+
+## AI interviews
+
+An AI interview question (an interview conducted by a language model inside the questionnaire)
+arrives as the whole conversation. `sondavi_unnest()` writes the columns the CSV export and the
+codebook have — `<question>.status` (how it ended, a factor), `.turns` (answers given), for an
+interview with a list of questions `.answered` and `.skipped` (already covered by an earlier
+answer), and `.summary` when the interview offers summaries. The conversation itself, one row
+per message:
+
+```r
+talk <- sondavi_conversations(d)     # before sondavi_unnest()
+said <- subset(talk, role == "respondent")
+tapply(said$text, said$response_id, paste, collapse = " ")   # all a person said
+table(said$input)                                            # typed or spoken
+```
+
+Each row has `question`, `message` (its place in the conversation), `role` (interviewer or
+respondent), `answer` (the respondent's 1st, 2nd … answer), `text`, `input` (`"text"` or
+`"voice"`) and `at` (when it was written, UTC); a flow interview's messages also name the
+stage (`state`).
+
+A study run entirely as an interview (the whole questionnaire as a chat) stores the answers
+as usual, plus per question whether and how often the interviewer followed up and the
+exchange about it as text: `sondavi_unnest()` gives `interview_probing.<question>.was_probed`,
+`.follow_up_count`, `.initial_response` and `.transcript`. The complete conversation of such
+an interview, with recordings, is in the platform's interview-transcript export.
 
 ## Waves of a study series
 

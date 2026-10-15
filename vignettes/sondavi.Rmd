@@ -178,6 +178,21 @@ head(m[, c("question", "category", "row", "col", "x_px", "y_px")])
 pixels of the original image - the mapping, already done. The table is the one
 the platform's image-markings export writes.
 
+### AI interviews
+
+An AI interview question stores the whole conversation. `sondavi_unnest()`
+makes the export's columns of it (how it ended, how many answers, the chosen
+summary); the conversation itself is a table of its own, one row per message:
+
+```{r}
+talk <- sondavi_conversations(d)
+said <- subset(talk, role == "respondent")
+aggregate(nchar(text) ~ response_id, data = said, FUN = sum)   # characters a person wrote
+```
+
+Call it before `sondavi_unnest()`, which replaces the conversation by those
+columns.
+
 ## Joining waves
 
 ```{r}
