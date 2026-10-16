@@ -111,8 +111,10 @@ sondavi_codebook <- function(con, survey_id) {
 #'
 #' These are the same rows as the platform's JSON export, which means **partial
 #' responses are included** when the study saves them: someone who stopped
-#' halfway is a row whose `completed_at` is `NA`. `nrow()` is therefore not the
-#' number of completed participations - use
+#' halfway is a row whose `completed_at` is `NA`. So is someone the study
+#' screened out - their row has `screened_out_at` and `screen_out_reason`
+#' instead (those two columns only come for studies that can screen out).
+#' `nrow()` is therefore not the number of completed participations - use
 #' `subset(d, !is.na(completed_at))` when that is what you mean.
 #'
 #' A value the codebook has no label for - an answer to an option deleted after
@@ -265,13 +267,14 @@ rows_to_frame <- function(rows) {
   as.data.frame(cols, stringsAsFactors = FALSE, optional = TRUE)
 }
 
-# The platform's own timestamps, which every study carries. They arrive as
+# The platform's own timestamps, which every study carries (`screened_out_at` only a study
+# that can screen people out). They arrive as
 # wall-clock strings without a zone ("2026-09-23 10:45:29"), and left as text
 # they are a quiet trap: `d$completed_at > Sys.time() - 7 * 86400` compares a
 # character column against a date and returns an answer instead of an error.
 # So does sorting by it. The API names its zone in the response; UTC is the
 # fallback for an older instance that does not.
-PLATFORM_TIMESTAMPS <- c("completed_at", "started_at")
+PLATFORM_TIMESTAMPS <- c("completed_at", "started_at", "screened_out_at")
 
 parse_timestamps <- function(data, timezone = NULL) {
   tz <- if (is.null(timezone) || !nzchar(timezone)) "UTC" else timezone

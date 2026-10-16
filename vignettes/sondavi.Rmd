@@ -94,7 +94,8 @@ attr(d$mood, "label")
 
 **Partial responses are included** when the study saves them, exactly as in the
 platform's export. Someone who stopped halfway is a row whose `completed_at` is
-`NA`:
+`NA` - and so is someone the study screened out, whose row carries `screened_out_at`
+and `screen_out_reason` instead:
 
 ```{r}
 nrow(d)                                  # everyone who started

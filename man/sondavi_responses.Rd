@@ -48,7 +48,10 @@ real labels instead of bare codes.
 \details{
 These are the same rows as the platform's JSON export, which means \strong{partial
 responses are included} when the study saves them: someone who stopped
-halfway is a row whose \code{completed_at} is \code{NA}. \code{nrow()} is therefore not the
+halfway is a row whose \code{completed_at} is \code{NA}. So is someone the study
+screened out - their row has \code{screened_out_at} and \code{screen_out_reason}
+instead (those two columns only come for studies that can screen out).
+\code{nrow()} is therefore not the
 number of completed participations - use
 \code{subset(d, !is.na(completed_at))} when that is what you mean.
 

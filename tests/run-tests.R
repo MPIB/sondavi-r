@@ -73,7 +73,7 @@ fails_with("a study out of scope says so without guessing", "not given access",
 
 cat("\nListing and codebook\n")
 s <- sondavi_surveys(con)
-ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 3)
+ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 4)
 # Not a written-down id: `clients/fixtures-aufzeichnen.sh` records a fresh study each
 # time, so a constant here would fail the suite for a reason that has nothing to do
 # with the client.
@@ -458,6 +458,20 @@ ok("time to the second, fractions kept", abs(as.numeric(difftime(oc$at[2], oc$at
 ok("an interview without messages contributes no rows", all(oc$response_id == 1))
 ok("a study without interview questions gives an empty table, same columns",
    nrow(sondavi_conversations(dl)) == 0 && identical(names(sondavi_conversations(dl)), names(talk)))
+
+cat("\nScreened out, and a bot check as a question\n")
+# The fourth study screens people under 18 out and asks a bot check on its second page
+# (SPECS §79, §80): PNL-2 was screened out, PNL-3 failed the check, which only flags.
+sc <- sondavi_responses(con, s$id[4])
+ok("everyone is a row, the screened-out person too", nrow(sc) == 3)
+ok("the screened-out row has no completed_at", identical(is.na(sc$completed_at), c(FALSE, TRUE, FALSE)))
+ok("its time of screen-out is a timestamp, like completed_at",
+   inherits(sc$screened_out_at, "POSIXct") && identical(is.na(sc$screened_out_at), c(TRUE, FALSE, TRUE)))
+ok("and its reason is there", identical(sc$screen_out_reason, c(NA, "under 18", NA)))
+ok("finished means completed_at set: the screen-out is not counted", nrow(subset(sc, !is.na(completed_at))) == 2)
+ok("the bot check question reads as passed / failed, with its labels",
+   is.factor(sc$human) && identical(as.character(sc$human), c("Passed", NA, "Failed")))
+ok("the overall bot check result is a yes/no column", identical(sc$bot_check_passed, c(TRUE, NA, FALSE)))
 
 cat("\nJoining waves\n")
 waves <- sondavi_waves(con, s$id[1:2], names = c("w1", "w2"))

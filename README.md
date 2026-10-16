@@ -59,12 +59,15 @@ at most 90 days.
 a factor with its real labels rather than as bare codes, and the question text rides along
 as a `label` attribute. Pass `labels = FALSE` for the raw values.
 
-`completed_at` and `started_at` arrive as real `POSIXct` timestamps in the platform's time
-zone, so a duration is `difftime(d$completed_at, d$started_at)` and not a parsing exercise.
+`completed_at` and `started_at` (and `screened_out_at`, in a study that screens people out)
+arrive as real `POSIXct` timestamps in the platform's time zone, so a duration is
+`difftime(d$completed_at, d$started_at)` and not a parsing exercise.
 
 These are the same rows as the platform's JSON export, which means **partial responses are
 included** when the study saves them — someone who stopped halfway is a row whose
-`completed_at` is `NA`. `nrow(d)` is therefore not the number of completed participations:
+`completed_at` is `NA`. So is someone the study screened out; their row carries
+`screened_out_at` and `screen_out_reason` instead. `nrow(d)` is therefore not the number of
+completed participations:
 
 ```r
 done <- subset(d, !is.na(completed_at))
