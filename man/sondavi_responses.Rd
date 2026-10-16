@@ -51,9 +51,10 @@ responses are included} when the study saves them: someone who stopped
 halfway is a row whose \code{completed_at} is \code{NA}. So is someone the study
 screened out - their row has \code{screened_out_at} and \code{screen_out_reason}
 instead (those two columns only come for studies that can screen out).
-\code{nrow()} is therefore not the
-number of completed participations - use
-\code{subset(d, !is.na(completed_at))} when that is what you mean.
+\code{nrow()} is therefore not the number of completed participations. Every row
+says what became of it in \code{response_status}, a factor with the levels
+\code{complete}, \code{partial} and \code{screened_out} - use
+\code{subset(d, response_status == "complete")} when you mean the completed ones.
 
 A value the codebook has no label for - an answer to an option deleted after
 people had chosen it, or a code added without a label - is kept as a factor
@@ -64,7 +65,8 @@ does not become \code{NA}, which would read as "not answered".
 \dontrun{
 d <- sondavi_responses(con, 42)
 table(d$mood)                             # a factor with its real labels
-done <- subset(d, !is.na(completed_at))   # drop partial responses
+table(d$response_status)                 # complete, partial, screened_out
+done <- subset(d, response_status == "complete")
 mean(difftime(done$completed_at, done$started_at, units = "mins"))
 
 recent <- sondavi_responses(con, 42, since = Sys.Date() - 7)

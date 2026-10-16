@@ -67,10 +67,12 @@ These are the same rows as the platform's JSON export, which means **partial res
 included** when the study saves them — someone who stopped halfway is a row whose
 `completed_at` is `NA`. So is someone the study screened out; their row carries
 `screened_out_at` and `screen_out_reason` instead. `nrow(d)` is therefore not the number of
-completed participations:
+completed participations. Every row says what became of it in `response_status`, a factor
+with the levels `complete`, `partial` and `screened_out`:
 
 ```r
-done <- subset(d, !is.na(completed_at))
+table(d$response_status)
+done <- subset(d, response_status == "complete")
 ```
 
 Nested answers — matrices, dynamic panels, jsPsych trials — stay as list columns. Flattening

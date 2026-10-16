@@ -98,8 +98,9 @@ platform's export. Someone who stopped halfway is a row whose `completed_at` is
 and `screen_out_reason` instead:
 
 ```{r}
-nrow(d)                                  # everyone who started
-done <- subset(d, !is.na(completed_at))  # everyone who finished
+nrow(d)                                           # everyone who started
+table(d$response_status)                          # complete, partial, screened_out
+done <- subset(d, response_status == "complete")  # everyone who finished
 ```
 
 **Timestamps are timestamps**, not text, so durations work directly:

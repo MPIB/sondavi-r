@@ -1,3 +1,17 @@
+# sondavi 0.7.0
+
+## Every row says what became of it
+
+* Each response now carries `response_status`: `complete`, `partial` (stopped before the end)
+  or `screened_out`. It arrives as a factor with all three levels, in this order, so
+  `table(d$response_status)` shows a 0 where nobody was screened out instead of leaving the
+  category out, and `subset(d, response_status == "complete")` keeps the completed ones.
+  `sondavi_snapshot_responses()` does the same.
+* A status this version does not know is kept as a level of its own, with a warning, rather
+  than becoming `NA`.
+
+`subset(d, !is.na(completed_at))` still works and gives the same rows.
+
 # sondavi 0.6.1
 
 ## Screened-out participants and bot checks

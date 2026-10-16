@@ -114,8 +114,10 @@ sondavi_codebook <- function(con, survey_id) {
 #' halfway is a row whose `completed_at` is `NA`. So is someone the study
 #' screened out - their row has `screened_out_at` and `screen_out_reason`
 #' instead (those two columns only come for studies that can screen out).
-#' `nrow()` is therefore not the number of completed participations - use
-#' `subset(d, !is.na(completed_at))` when that is what you mean.
+#' `nrow()` is therefore not the number of completed participations. Every row
+#' says what became of it in `response_status`, a factor with the levels
+#' `complete`, `partial` and `screened_out` - use
+#' `subset(d, response_status == "complete")` when you mean the completed ones.
 #'
 #' A value the codebook has no label for - an answer to an option deleted after
 #' people had chosen it, or a code added without a label - is kept as a factor
@@ -142,7 +144,8 @@ sondavi_codebook <- function(con, survey_id) {
 #' \dontrun{
 #' d <- sondavi_responses(con, 42)
 #' table(d$mood)                             # a factor with its real labels
-#' done <- subset(d, !is.na(completed_at))   # drop partial responses
+#' table(d$response_status)                 # complete, partial, screened_out
+#' done <- subset(d, response_status == "complete")
 #' mean(difftime(done$completed_at, done$started_at, units = "mins"))
 #'
 #' recent <- sondavi_responses(con, 42, since = Sys.Date() - 7)
@@ -178,6 +181,7 @@ sondavi_responses <- function(con, survey_id, since = NULL, include_test = FALSE
 
   out <- rows_to_frame(flat)
   out <- parse_timestamps(out, first_meta$timezone)
+  out <- parse_status(out)
   codebook <- if (labels && nrow(out)) sondavi_codebook(con, survey_id)
   if (!is.null(codebook)) out <- apply_codebook(out, codebook)
 
@@ -275,6 +279,25 @@ rows_to_frame <- function(rows) {
 # So does sorting by it. The API names its zone in the response; UTC is the
 # fallback for an older instance that does not.
 PLATFORM_TIMESTAMPS <- c("completed_at", "started_at", "screened_out_at")
+
+# What became of each response, in this order. The levels are the values themselves, so
+# `d$response_status == "complete"` reads as it is written.
+RESPONSE_STATUSES <- c("complete", "partial", "screened_out")
+
+# `response_status` as a factor with all three levels, also those no row has: `table()` then
+# shows a 0 for nobody screened out rather than leaving the category out. A value this version
+# does not know is kept as a level of its own, with a warning - as an unknown answer is.
+parse_status <- function(data) {
+  value <- data[["response_status"]]
+  if (is.null(value) || !is.character(value)) return(data)
+  unknown <- setdiff(unique(value[!is.na(value)]), RESPONSE_STATUSES)
+  if (length(unknown)) {
+    warning("`response_status` holds ", quoted_list(unknown), ", which this version of the package does not know. ",
+            "It is kept as a level of its own; a newer version may know what it means.", call. = FALSE)
+  }
+  data[["response_status"]] <- factor(value, levels = c(RESPONSE_STATUSES, unknown))
+  data
+}
 
 parse_timestamps <- function(data, timezone = NULL) {
   tz <- if (is.null(timezone) || !nzchar(timezone)) "UTC" else timezone
@@ -618,6 +641,7 @@ sondavi_snapshot_responses <- function(con, snapshot_id, labels = TRUE) {
 
   out <- rows_to_frame(body$data)
   out <- parse_timestamps(out, body$meta$timezone)
+  out <- parse_status(out)
   meta <- body$meta$snapshot
   codebook <- if (labels && nrow(out)) sondavi_codebook(con, meta$survey_id)
   if (!is.null(codebook)) out <- apply_codebook(out, codebook)

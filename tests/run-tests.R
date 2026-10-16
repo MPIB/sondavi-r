@@ -12,6 +12,7 @@ if (!requireNamespace("sondavi", quietly = TRUE)) {
   # The internals the checks below reach into.
   sondavi_get <- getFromNamespace("sondavi_get", "sondavi")
   apply_codebook <- getFromNamespace("apply_codebook", "sondavi")
+  parse_status <- getFromNamespace("parse_status", "sondavi")
 }
 
 # Der Port kommt aus tests/run.py, das einen freien waehlt: ein fester ist eine Wette auf
@@ -162,6 +163,7 @@ rep <- sondavi_snapshot_responses(con, snap$id)
 ok("replaying returns the recorded rows", nrow(rep) == 3)
 ok("and reports the set as intact", isTRUE(attr(rep, "sondavi_complete")))
 ok("with the codebook applied", is.factor(rep$mood))
+ok("and the status as a factor, as in sondavi_responses()", identical(levels(rep$response_status), c("complete", "partial", "screened_out")))
 
 # The captured answer from AFTER one response was deleted, the way an erasure
 # request or retention deletes it. This is what the whole design exists for.
@@ -469,6 +471,16 @@ ok("its time of screen-out is a timestamp, like completed_at",
    inherits(sc$screened_out_at, "POSIXct") && identical(is.na(sc$screened_out_at), c(TRUE, FALSE, TRUE)))
 ok("and its reason is there", identical(sc$screen_out_reason, c(NA, "under 18", NA)))
 ok("finished means completed_at set: the screen-out is not counted", nrow(subset(sc, !is.na(completed_at))) == 2)
+ok("every row says what became of it: a factor complete / partial / screened_out, all three levels",
+   is.factor(sc$response_status) && identical(levels(sc$response_status), c("complete", "partial", "screened_out")) &&
+     identical(as.character(sc$response_status), c("complete", "screened_out", "complete")))
+ok("and counts the completed ones as completed_at does", nrow(subset(sc, response_status == "complete")) == 2)
+ok("table() names the empty level too", identical(as.vector(table(sc$response_status)), c(2L, 0L, 1L)))
+said <- NULL
+st <- withCallingHandlers(parse_status(data.frame(response_status = c("complete", "quota_full"), stringsAsFactors = FALSE)),
+                          warning = function(w) { said <<- conditionMessage(w); invokeRestart("muffleWarning") })
+ok("a status this version does not know is kept as a level of its own, with a warning",
+   identical(as.character(st$response_status), c("complete", "quota_full")) && grepl("quota_full", said))
 ok("the bot check question reads as passed / failed, with its labels",
    is.factor(sc$human) && identical(as.character(sc$human), c("Passed", NA, "Failed")))
 ok("the overall bot check result is a yes/no column", identical(sc$bot_check_passed, c(TRUE, NA, FALSE)))
