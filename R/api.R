@@ -63,8 +63,11 @@ sondavi_surveys <- function(con) {
 #' @export
 sondavi_codebook <- function(con, survey_id) {
   body <- sondavi_get(con, paste0("surveys/", survey_id, "/codebook"))
-  vars <- body$variables
+  codebook_frame(body$variables)
+}
 
+# The codebook's variables, as the API sends them, as a data frame (see sondavi_codebook()).
+codebook_frame <- function(vars) {
   if (!length(vars)) {
     return(data.frame(
       name = character(), label = character(), type = character(),
@@ -492,10 +495,17 @@ insert_after <- function(data, after, name, value) {
 #' need to remember which of them are worded the other way round. An answer that
 #' is no number ("Don't know" coded `dk`) is `NA`.
 #'
+#' An item marked "Reverse-scored" whose scale has no numbers (columns named
+#' `column1`, `column2` ...) cannot be mirrored: it is `NA`, with a warning, as
+#' its reversed copy is empty in the platform's export.
+#'
 #' `sondavi_scale()` is the mean of those numbers per row. It is `NA` for a row
 #' with fewer than `min_items` numbers - by default every item has to be
 #' answered, so a mean over fewer items never happens unnoticed. Lower
-#' `min_items` to allow gaps, e.g. `min_items = 3` for three of four.
+#' `min_items` to allow gaps, e.g. `min_items = 3` for three of four; more than
+#' there are items means every item. The rule is the platform's own (its scale
+#' score in the questionnaire gives the same numbers): an item a condition hid
+#' from the participant is empty in the data and counts as unanswered.
 #'
 #' @param data A data frame from [sondavi_unnest()] (a matrix row is a column of
 #'   its own there) or [sondavi_responses()].
@@ -527,6 +537,14 @@ sondavi_items <- function(data, items, reverse = TRUE, codebook = attr(data, "so
 
   copies <- reversed_copies(codebook)
   names(copies) <- vapply(copies, function(copy) copy$source, character(1))
+  # Marked, but no numbers on the scale to mirror against: the platform leaves the reversed
+  # copy empty, and its scale score counts the item as unanswered. Counted as answered, the
+  # unmirrored answer went into the mean.
+  unmirrored <- if (reverse) intersect(items, codebook$name[codebook$reverse_scored %in% TRUE & is.na(codebook$reverse_min)]) else character()
+  if (length(unmirrored)) {
+    warning("Marked reverse-scored, but the scale has no numbers to mirror against - counted as unanswered: ",
+            quoted_list(unmirrored), ".", call. = FALSE)
+  }
 
   out <- list()
   for (item in items) {
@@ -537,6 +555,8 @@ sondavi_items <- function(data, items, reverse = TRUE, codebook = attr(data, "so
       value <- copy$sum - value
       item <- copy$name
       if (!is.na(label)) label <- paste(label, "(reverse-scored)")
+    } else if (item %in% unmirrored) {
+      value <- rep(NA_real_, length(value))
     }
     if (!is.na(label) && nzchar(label)) attr(value, "label") <- label
     out[[item]] <- value
@@ -550,7 +570,8 @@ sondavi_scale <- function(data, items, min_items = length(items), codebook = att
   if (min_items < 1) stop("`min_items` has to be at least 1.", call. = FALSE)
   values <- sondavi_items(data, items, codebook = codebook)
   score <- rowMeans(values, na.rm = TRUE)
-  score[rowSums(!is.na(values)) < min_items] <- NA_real_
+  # More than there are items means every item, as in the platform's scale score.
+  score[rowSums(!is.na(values)) < min(min_items, length(items))] <- NA_real_
   score
 }
 

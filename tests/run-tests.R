@@ -13,6 +13,7 @@ if (!requireNamespace("sondavi", quietly = TRUE)) {
   sondavi_get <- getFromNamespace("sondavi_get", "sondavi")
   apply_codebook <- getFromNamespace("apply_codebook", "sondavi")
   parse_status <- getFromNamespace("parse_status", "sondavi")
+  codebook_frame <- getFromNamespace("codebook_frame", "sondavi")
 }
 
 # Der Port kommt aus tests/run.py, das einen freien waehlt: ein fester ist eine Wette auf
@@ -308,6 +309,29 @@ ok("without a codebook it says how to get one",
    inherits(tryCatch(sondavi_items(raw_unlabelled, scale_items), error = function(e) e), "error") &&
    grepl("sondavi_codebook", tryCatch(sondavi_items(raw_unlabelled, scale_items), error = conditionMessage)))
 ok("an unknown column is named", grepl("b5.nope", tryCatch(sondavi_items(flat, "b5.nope"), error = conditionMessage)))
+
+cat("\nScale scores: the platform's rule, case by case\n")
+# The cases of the platform's own scale score (its SPECS §75.6), made there into
+# tests/fixtures/scale_cases.json: codebook and stored answers as the API gives them, and the score
+# the questionnaire computes. The answers go in as they arrive - a factor with its labels.
+scale_cases <- jsonlite::fromJSON(file.path(FIXTURES, "scale_cases.json"), simplifyVector = FALSE)$cases
+for (case in scale_cases) {
+  case_cb <- codebook_frame(case$codebook)
+  stored <- as.data.frame(lapply(case$data, function(v) if (is.null(v)) NA else v),
+                          optional = TRUE, stringsAsFactors = FALSE)
+  case_data <- apply_codebook(stored, case_cb)
+  items <- unlist(case$items)
+  min_items <- if (is.null(case$min_items)) length(items) else case$min_items
+  got <- suppressWarnings(sondavi_scale(case_data, items, min_items = min_items, codebook = case_cb))
+  want <- if (is.null(case$expected)) NA_real_ else case$expected
+  ok(case$name, (is.na(want) && is.na(got)) || (!is.na(got) && abs(got - want) < 1e-9))
+}
+noscale <- Filter(function(case) grepl("without a number scale", case$name), scale_cases)[[1]]
+noscale_cb <- codebook_frame(noscale$codebook)
+noscale_data <- as.data.frame(noscale$data, stringsAsFactors = FALSE)
+ok("a reverse-scored item with nothing to mirror against says so",
+   grepl("m.r2", tryCatch(sondavi_items(noscale_data, unlist(noscale$items), codebook = noscale_cb),
+                          warning = conditionMessage)))
 
 cat("\nAnswers without a value label\n")
 # Matching against the labels alone turned them into NA, which reads as "not answered".

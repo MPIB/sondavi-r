@@ -55,10 +55,17 @@ name the items of a scale as they are called in the questionnaire and do not
 need to remember which of them are worded the other way round. An answer that
 is no number ("Don't know" coded \code{dk}) is \code{NA}.
 
+An item marked "Reverse-scored" whose scale has no numbers (columns named
+\code{column1}, \code{column2} ...) cannot be mirrored: it is \code{NA}, with a warning, as
+its reversed copy is empty in the platform's export.
+
 \code{sondavi_scale()} is the mean of those numbers per row. It is \code{NA} for a row
 with fewer than \code{min_items} numbers - by default every item has to be
 answered, so a mean over fewer items never happens unnoticed. Lower
-\code{min_items} to allow gaps, e.g. \code{min_items = 3} for three of four.
+\code{min_items} to allow gaps, e.g. \code{min_items = 3} for three of four; more than
+there are items means every item. The rule is the platform's own (its scale
+score in the questionnaire gives the same numbers): an item a condition hid
+from the participant is empty in the data and counts as unanswered.
 }
 \examples{
 \dontrun{
