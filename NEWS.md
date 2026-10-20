@@ -1,3 +1,8 @@
+# sondavi 0.8.1
+
+* A check in the package's own tests passed a text where R expects `TRUE`. R 4.6 refuses
+  that, so the tests failed there. The package itself is unchanged.
+
 # sondavi 0.8.0
 
 ## Certified datasets

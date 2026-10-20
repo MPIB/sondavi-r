@@ -212,7 +212,7 @@ fails_with("a file that is no keys document is refused", "not a keys document",
 cat("\nTrust is explicit\n")
 u <- verify(fx("dataset.csv"), trust = "https://sondavi.io")
 ok("an issuer that is not trusted: untrusted_issuer", u$status == "untrusted_issuer" && !u$valid)
-ok("and it says whom the certificate names", any(grepl(TRUST, capture.output(print(u)), fixed = TRUST)))
+ok("and it says whom the certificate names", any(grepl(TRUST, capture.output(print(u)), fixed = TRUE)))
 # No keys given, default trust: the issuer is refused before anything would be fetched -
 # this runs offline because the package never contacts an issuer it does not trust.
 ok("by default only sondavi.io is trusted, and nothing is fetched from anyone else",
