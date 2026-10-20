@@ -5,5 +5,6 @@
 ^tests/run\.sh$
 ^tests/run\.py$
 ^tests/fixture-server\.py$
-^tests/fixtures$
+^tests/fixtures/(?!certificates$)[^/]+$
+^\.gitattributes$
 ^LICENSE\.md$

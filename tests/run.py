@@ -86,7 +86,11 @@ def main() -> int:
             return 1
 
         env = dict(os.environ, SONDAVI_TEST_PORT=str(port))
-        return subprocess.call(["Rscript", os.path.join(HERE, "run-tests.R")], env=env)
+        api = subprocess.call(["Rscript", os.path.join(HERE, "run-tests.R")], env=env)
+        # The certificate checks need no server; they read the platform's own files in
+        # tests/fixtures/certificates/, found relative to this folder.
+        certificates = subprocess.call(["Rscript", "certificate-tests.R"], cwd=HERE)
+        return api or certificates
     finally:
         server.terminate()
         try:

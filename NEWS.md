@@ -1,3 +1,49 @@
+# sondavi 0.8.0
+
+## Certified datasets
+
+The platform can now issue a dataset with a certificate: the CSV file plus a
+`<name>.certificate.json` it signs, vouching that every cell holds exactly what the
+participants entered.
+
+* `sondavi_verify(data, certificate)` checks such a pair on your own computer and says
+  whether every certified cell matches - and if not, which cells differ, or why the file
+  cannot be checked at all. It also names the study, the organisation, the issuer and the
+  date, says how many rows were left out, and sorts the columns of the file as the platform's
+  verify page does, each in one place: certified, in the file but not certified (left out when
+  the certificate was issued, computed by the platform, or added afterwards) and missing.
+* It takes the **files**, not a data frame: a data frame has already turned `"007"` into
+  `7`. For the same reason a file opened in a spreadsheet program and saved again is
+  reported as modified.
+* It also checks the certificate of a file you had certified yourself - a CSV, Excel or JSON
+  file the platform compared with the stored responses, or with a file it certified earlier.
+  Such a file is hashed, not read: it is valid when its bytes are the ones certified, and the
+  result lists what the comparison found (responses left out, by status and group; columns
+  not in the file and your own; values in another notation; the row order) and, for a file
+  compared with one certified earlier, which certificate that was ("Derived from").
+  `v$kind` says which kind of certificate it is.
+* To share a version with fewer columns or rows, or in another format, certify the changed
+  file on the platform that issued the certificate ("Certify a file you have", compared with
+  the certified file) - that works even after the responses were deleted there. Deleting
+  columns or rows by hand, or saving the file again from a spreadsheet program, makes the
+  certificate fail.
+* The data file is read strictly, as every verifier of the platform reads it: valid UTF-8,
+  quotes only around a whole field, line ends LF or CRLF, and every row exactly as wide as
+  the header. A file another program could read differently - a row longer than the header,
+  which R and pandas read shifted, for one - is reported as unverifiable.
+* The summary names what the certificate marks: columns computed from the questionnaire
+  rather than certified, values reported by the participant's browser, and responses from
+  offline devices; for a certified file also how it was read and how its rows were matched.
+* Only `https://sondavi.io` is trusted by default; a certificate from another installation
+  is reported as coming from an untrusted issuer until you list it in `trust`.
+* The keys of `https://sondavi.io` known when this version was released are built into the
+  package, so a certificate signed with one of them is checked without a connection. A newer
+  key is fetched from the issuer; keys passed with `keys =` are used instead of both.
+
+The package now imports `openssl` (already installed wherever `httr2` is). The checks run
+against files the platform itself issued, so this package, the platform and the browser
+check give the same answer for the same pair.
+
 # sondavi 0.7.1
 
 ## Scale scores as the questionnaire computes them

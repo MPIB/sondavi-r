@@ -54,6 +54,7 @@ at most 90 days.
 | `sondavi_markings(d)` | image marking answers as one row per cell or pin, for a heatmap |
 | `sondavi_conversations(d)` | AI interview questions as one row per message |
 | `sondavi_waves(con, ids)` | join the waves of a study series by respondent |
+| `sondavi_verify(data, certificate)` | check a certified dataset against its certificate |
 
 `sondavi_responses()` applies the codebook by default, so a categorical question arrives as
 a factor with its real labels rather than as bare codes, and the question text rides along
@@ -195,6 +196,123 @@ A snapshot records *which* responses your result was computed from, never a copy
 so deletion requests and retention keep working. Replay it later and, if some are gone, you
 get a warning saying how many, rather than a quietly smaller dataset.
 
+## Verifying a certified dataset
+
+The platform can issue a dataset with a certificate: `wave2.csv` plus
+`wave2.certificate.json`, signed by the platform. It vouches that every cell it covers
+holds exactly what the participants entered — so a reviewer, a journal or a co-author can
+check the data themselves, without an account and without having to trust whoever sent
+the files.
+
+```r
+v <- sondavi_verify("wave2.csv", "wave2.certificate.json")
+v
+#> Valid: every certified cell matches.
+#> Survey:          Wave 2 follow-up (id 42, questionnaire version 3, pseudonymized)
+#> Organisation:    Example Institute
+#> Issuer:          Sondavi, https://sondavi.io
+#> Issued:          2026-10-20 08:00 UTC
+#> ...
+#> Removed columns: respondent_id, ip_address
+v$valid
+#> [1] TRUE
+```
+
+Pass the **files**, not a data frame: reading a CSV into a data frame changes the text
+(`"007"` becomes `7`, `"NA"` a missing value), and the certificate is about the text as it
+was delivered. The file is read byte for byte.
+
+What the result can say, in the order the checks run:
+
+| status | meaning |
+|---|---|
+| `malformed` | the certificate file is not a certificate of a supported version |
+| `untrusted_issuer` | it comes from an installation you have not listed in `trust` |
+| `unknown_key` | the issuer's published keys do not include the one that signed it |
+| `invalid_signature` | the certificate itself was altered |
+| `unverifiable` | the file does not have the certificate's structure (a column deleted by hand, rows missing, a row with more or fewer fields than the header, not a well-formed CSV) |
+| `modified` | the certificate is genuine, but cells differ — `v$modified_cells` names them |
+| `valid` | every certified cell matches |
+
+Columns you added yourself are fine — the result lists them (`added_columns`), as it lists
+certified columns and rows that were left out (`removed_columns`, `removed_rows`).
+Changing a value, inventing or reordering rows is found, and so is deleting columns or
+rows by hand, or **opening the file in a spreadsheet program and saving it again**: that
+rewrites numbers and dates, and the cells concerned show up as modified. Pass the file on
+as it was downloaded.
+
+The file is read strictly, as every verifier of the platform reads it: valid UTF-8, comma,
+quotes only around a whole field, line ends LF or CRLF, every row as wide as the header.
+Anything another program could read differently makes the check `unverifiable` rather than
+let a file pass that R or pandas would read shifted.
+
+The result also says what the certificate itself marks: columns the platform computed from
+the questionnaire when it wrote the file ("Computed, not certified" — attention checks,
+quality scores, reversed copies), values the participant's browser reported rather than the
+platform measured ("Reported by the browser" — times, order, device), and responses collected
+on offline devices, whose completion time is the device's.
+
+When cells differ in several rows *and* several columns, `v$suspect` is `TRUE`: the
+certificate holds one sum per row and one per column, not each cell, so the cells listed
+are where a differing row meets a differing column — suspects, not all of them changed.
+
+**Trust is explicit.** Anyone can run an installation with a key of their own, so only
+`https://sondavi.io` is accepted by default. The keys of `https://sondavi.io` known when
+this version of the package was released are built into it, and a certificate signed with
+one of them is checked without a connection. For a newer key the issuer's published keys
+are fetched from `<issuer>/.well-known/sondavi-certificate-keys.json` — and only once the
+issuer is trusted. A certificate from another installation reads as `untrusted_issuer`
+until you name that installation in `trust` — the `README.txt` that comes with a certified
+download gives the address to pass. Its keys are then fetched from there, or you pass them
+yourself (then only those are used):
+
+```r
+sondavi_verify("data.csv", "data.certificate.json",
+               trust = "https://survey.example.org", keys = "keys.json")
+```
+
+### A file you had certified
+
+The platform can also certify a file you already have — a CSV, Excel or JSON file of the
+responses, perhaps cleaned or reduced: it compares every value with the stored responses,
+or with a file it certified earlier, and then signs the file's fingerprint (the SHA-256 of
+its bytes) together with what the comparison found. Check it the same way, with the file
+itself:
+
+```r
+v <- sondavi_verify("wave2-clean.xlsx", "wave2-clean.certificate.json")
+v
+#> Valid: this is the file that was certified.
+#> ...
+#> How:             Certified from the researcher's own Excel file, after every value was compared with a file certified earlier
+#> Derived from:    certificate 8869174a of 2026-10-20 (wave2.csv)
+#> File:            wave2-clean.xlsx (48,213 bytes)
+#> Read as:         Excel, sheet "Responses"
+#> Rows matched:    by response ID
+#> Rows:            312 of 318 responses of this survey
+#> Left out:        6 responses: 4 incomplete, 2 screened out
+#> Not in the file: respondent_id, ip_address
+#> Own columns:     age_group (not checked)
+#> Notation:        q_num (12 cells) - the same value in another notation
+#> Row order:       changed
+v$kind
+#> [1] "file"
+```
+
+The file is hashed, not read, so **any** change makes it another file — also opening it
+and saving it again unchanged; the result is then `modified`. What the comparison found
+is in `v$manifest$basis`; `Derived from` names the earlier certificate the file was
+compared with, when it was.
+
+### Sharing fewer columns or rows
+
+To share a version with fewer columns or rows — without the pseudonyms, or without the
+people who did not agree to sharing — or in another format, certify the changed file on
+the platform that issued the certificate ("Certify a file you have", compared with the
+certified file). That works even after the responses were deleted there, and the new
+certificate says what was left out. Deleting columns or rows by hand, or saving the file
+again from a spreadsheet program, makes the certificate fail.
+
 ## Identifiers
 
 Answers always come through. Two groups only if the token was given those abilities when you
@@ -222,6 +340,16 @@ tests/run.sh
 Starts a small server that replays **real answers captured from the platform**
 (`tests/fixtures/`), including one recorded after a response was erased. No network, no
 credentials. Under `R CMD check` these are skipped, since they need that server.
+
+The certificate checks need no server and run on their own as well:
+
+```
+Rscript tests/certificate-tests.R
+```
+
+They use files the platform itself issued (`tests/fixtures/certificates/`) — a valid
+dataset, one with a column and a row left out, a tampered one, certified files — the same
+set the platform's own verifier is checked against.
 
 ## License
 

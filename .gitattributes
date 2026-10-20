@@ -1,0 +1,3 @@
+# The certified fixtures are compared byte for byte: a line break inside a quoted cell
+# (CRLF) is part of a certified value, so git must not touch their line endings.
+tests/fixtures/certificates/** -text

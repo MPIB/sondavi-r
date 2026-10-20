@@ -258,6 +258,26 @@ more than their own token allows: if yours carried identifiers and theirs does
 not, they get the same rows with fewer columns, and are told that the recorded
 fingerprint does not describe what they received.
 
+## Passing on a certified dataset
+
+If you share your data as a certified dataset from the platform — the CSV file with its
+`.certificate.json` — anyone can check that every certified cell is what the participants
+entered, without an account:
+
+```{r}
+v <- sondavi_verify("wave2.csv", "wave2.certificate.json")
+v$valid
+#> [1] TRUE
+```
+
+The keys of `https://sondavi.io` known when this version of the package was released are
+built in, so such a check needs a connection only for a newer key. To pass on a version with
+fewer columns or rows — without the pseudonyms, or without people who did not agree to
+sharing — or in another format, certify the changed file on the platform that issued the
+certificate ("Certify a file you have", compared with the certified file); that works even
+after the responses were deleted there. Deleting columns or rows by hand, or saving the file
+again from a spreadsheet program, makes the certificate fail.
+
 ## Fetching only what is new
 
 For a study still collecting, ask for the increment rather than everything:

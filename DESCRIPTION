@@ -1,6 +1,6 @@
 Package: sondavi
 Title: Read Your Own Study Data from the Sondavi Survey Platform
-Version: 0.7.1
+Version: 0.8.0
 Authors@R: person("Max Planck Institute for Human Development", role = c("aut", "cre"),
                   email = "arc-support@mpib-berlin.mpg.de")
 Description: Reads responses and variable metadata of your own studies from the
@@ -8,11 +8,12 @@ Description: Reads responses and variable metadata of your own studies from the
     start with an exported file. Applies the study's codebook, so categorical
     questions arrive as factors with their real labels rather than as character
     columns, and can record a citable snapshot of the exact set a result was
-    computed from.
+    computed from. Checks a certified dataset against the certificate the
+    platform signed for it.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 4.1)
-Imports: httr2, jsonlite, utils
+Imports: httr2, jsonlite, openssl, utils
 Suggests: tibble, knitr, rmarkdown
 VignetteBuilder: knitr
 URL: https://github.com/MPIB/sondavi-r
