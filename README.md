@@ -50,8 +50,11 @@ at most 90 days.
 | `sondavi_snapshot_responses(con, snapshot_id)` | replay one |
 | `sondavi_fingerprint(d)` | the line that belongs in your paper |
 | `sondavi_unnest(d)` | spread matrices and dynamic panels into one column each |
-| `sondavi_items(flat, items)` / `sondavi_scale(flat, items)` | the items of a scale as numbers, and the scale score |
+| `sondavi_items(flat, items)` / `sondavi_scale(flat, items)` | the items of a scale as numbers, and the scale score (mean or sum) |
+| `sondavi_scale(flat, score = "sdq_emo")` | a scale score of the questionnaire, worked out again from its rows |
+| `sondavi_options(d)` | one column per option of a multiple-choice question or ranking (`sondavi_unnest()` adds them too) |
 | `sondavi_markings(d)` | image marking answers as one row per cell or pin, for a heatmap |
+| `sondavi_files(con, id)` | the files participants uploaded, unpacked, one row per file |
 | `sondavi_conversations(d)` | AI interview questions as one row per message |
 | `sondavi_waves(con, ids)` | join the waves of a study series by respondent |
 | `sondavi_verify(data, certificate)` | check a certified dataset against its certificate |
@@ -113,6 +116,43 @@ psych::alpha(sondavi_items(flat, items))                # b5.calm, b5.worry_r, b
 
 "Don't know" and other answers that are no number count as missing. By default every item
 has to be answered, so a mean over fewer items never happens unnoticed.
+
+`method = "sum"` adds the items instead of averaging them. A scale score the questionnaire
+computes itself (Σ in the editor, with subscales if the matrix rows have them) is stored with
+each response as it was computed then; to work it out again — for responses recorded before
+you added or changed it — name it, and the codebook supplies its rows, method and minimum:
+
+```r
+flat$sdq_emo_now <- sondavi_scale(flat, score = "sdq_emo")   # the emotional subscale, summed
+```
+
+This needs a platform that describes its scale scores in the codebook (version 0.106 or later).
+
+## Questions with several answers
+
+A multiple-choice answer, a tag box or a ranking arrives as the list of options chosen and
+stays one list column. `sondavi_unnest()` adds one column per option right after it, as the
+export files have them — 1 chosen, 0 answered without it, `NA` not answered; for a ranking
+the option's place. `sondavi_options(d)` does the same without unnesting anything else.
+
+```r
+flat <- sondavi_unnest(d)
+table(flat$devices.phone)
+```
+
+## Uploaded files
+
+A "File Upload" answer in the responses is the file's name, type, size and a reference; the
+files themselves come with `sondavi_files()`:
+
+```r
+f <- sondavi_files(con, 42)            # unpacked into sondavi-files-42/
+drawings <- f[f$question == "drawing", c("response_id", "original_name", "local_path")]
+```
+
+A folder per question, the files named by response (`drawing/1234-1.png`), never by the name
+a participant gave them — so the drawings of one task can be rated without seeing whose they
+are. Join to the responses over `response_id`.
 
 ## Image marking
 

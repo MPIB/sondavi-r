@@ -75,7 +75,7 @@ fails_with("a study out of scope says so without guessing", "not given access",
 
 cat("\nListing and codebook\n")
 s <- sondavi_surveys(con)
-ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 4)
+ok("the studies arrive as a data frame", is.data.frame(s) && nrow(s) == 5)
 # Not a written-down id: `clients/fixtures-aufzeichnen.sh` records a fresh study each
 # time, so a constant here would fail the suite for a reason that has nothing to do
 # with the client.
@@ -320,9 +320,9 @@ for (case in scale_cases) {
   stored <- as.data.frame(lapply(case$data, function(v) if (is.null(v)) NA else v),
                           optional = TRUE, stringsAsFactors = FALSE)
   case_data <- apply_codebook(stored, case_cb)
-  items <- unlist(case$items)
+  items <- as.character(unlist(case$items))  # a subscale no row has: no items, not NULL
   min_items <- if (is.null(case$min_items)) length(items) else case$min_items
-  got <- suppressWarnings(sondavi_scale(case_data, items, min_items = min_items, codebook = case_cb))
+  got <- suppressWarnings(sondavi_scale(case_data, items, min_items = min_items, codebook = case_cb, method = case$method))
   want <- if (is.null(case$expected)) NA_real_ else case$expected
   ok(case$name, (is.na(want) && is.na(got)) || (!is.na(got) && abs(got - want) < 1e-9))
 }
@@ -522,6 +522,93 @@ ok("and is recognisable by their missing wave", dropped$respondent_id == "PNL-3"
 
 joined_err <- tryCatch(sondavi_waves(con, s$id[1]), error = function(e) conditionMessage(e))
 ok("one study is not a series", grepl("at least two", joined_err))
+
+cat("\nUploaded files (SPECS \u00a787)\n")
+upload_dir <- tempfile("sondavi-files-")
+f <- sondavi_files(con, SURVEY, dir = upload_dir)
+ok("every uploaded file arrives, one row each", is.data.frame(f) && nrow(f) == 3)
+anna <- f[f$original_name == "Anna drawing.png", ]
+ok("each row says whose file it is and where it now lies",
+   nrow(anna) == 1 && anna$question == "drawing" && anna$file_number == 1 && file.exists(anna$local_path))
+ok("the file on disk has the size the list gives",
+   file.info(anna$local_path)$size == anna$size)
+ok("files are named by response, never by the name the participant gave",
+   !any(grepl("Anna|Cleo", f$path)) && anna$path == paste0("drawing/", anna$response_id, "-1.png"))
+ok("the token may read identifiers, so the respondent is named", anna$respondent_id == "PNL-1")
+notes <- f[f$original_name == "notes.txt", ]
+ok("a text file is listed with its type and its size in bytes",
+   notes$type == "text/plain" && notes$size == nchar("two lines\nof notes", type = "bytes"))
+plain <- sondavi_files(sondavi_connect(BASE, paste0("sdv_", strrep("P", 48))), SURVEY, dir = tempfile("sondavi-files-"))
+ok("without the ability to read identifiers there is no respondent_id",
+   nrow(plain) == 3 && !("respondent_id" %in% names(plain)))
+unlink(upload_dir, recursive = TRUE)
+ok("a 404 for the files names an older platform as one reason",
+   grepl("0.106", tryCatch(sondavi_files(con, s$id[2], dir = tempfile("sondavi-files-")), error = conditionMessage)))
+
+cat("\nThe question types used most (a study of its own)\n")
+# The fifth study holds what the first does not: multiple choice with None and Other, a tag box, a ranking, a
+# rating, yes/no, a drop-down with Don't know, text boxes, a constant sum with its total, an SDQ-like matrix with
+# subscales and the questionnaire's own scale scores, and a loop with a score per copy. The platform's export file of
+# the same study is the yardstick (tests/fixtures/export_types_flat.json).
+TYPES <- s$id[s$title == "TEST Types study"]
+ty <- sondavi_responses(con, TYPES)
+ty_export <- jsonlite::fromJSON(file.path(FIXTURES, "export_types_flat.json"), simplifyVector = FALSE)
+from_export <- function(column) vapply(ty_export, function(r) {
+  v <- r[[column]]
+  if (is.null(v) || identical(v, "")) NA_character_ else as.character(v)
+}, character(1))
+same_as_export <- function(got, column) identical(unname(ifelse(is.na(got), NA_character_, as.character(got))), from_export(column))
+ok("multiple choice arrives as the list of options chosen, None and Other included",
+   identical(unlist(ty$devices[[1]]), c("phone", "other")) && identical(unlist(ty$devices[[2]]), "none") &&
+   ty$`devices-Comment`[1] == "smartwatch")
+ok("a rating is a number, yes/no a factor, Don't know a level of its own",
+   identical(as.numeric(ty$satisfied), c(4, 2, 5)) && identical(as.character(ty$consent), c("Yes", "No", NA)) &&
+   identical(as.character(ty$country), c("Germany", "Don't know", NA)))
+ok("the seed of SurveyJS' random orders comes along as a column of its own", identical(as.numeric(ty$`__random_seed`), c(1000, 1001, 1002)))
+
+opts <- sondavi_options(ty)
+option_columns <- grep("^(devices|apps|rank)\\.", names(opts), value = TRUE)
+ok("one column per option, the codebook's options in its order, right after the question",
+   identical(names(opts)[match("devices", names(opts)) + 1:5], paste0("devices.", c("phone", "laptop", "tablet", "none", "other"))))
+ok("every option column has the export file's values, row by row (1 chosen, 0 not, empty unanswered; a ranking's place)",
+   length(option_columns) == 11 && all(vapply(option_columns, function(col) same_as_export(opts[[col]], col), logical(1))))
+ok("the question's own list stays", is.list(opts$devices) && identical(unlist(opts$devices[[1]]), c("phone", "other")))
+ok("names = picks the questions", identical(setdiff(names(sondavi_options(ty, "rank")), names(ty)), paste0("rank.", c("family", "friends", "school"))))
+ok("a column that is no list of options is refused", grepl("satisfied", tryCatch(sondavi_options(ty, "satisfied"), error = conditionMessage)))
+
+tf <- sondavi_unnest(ty)
+ok("sondavi_unnest() no longer spreads a multiple choice by position (devices.0 read like an option)",
+   !any(grepl("^(devices|apps|rank)\\.[0-9]", names(tf))) && all(option_columns %in% names(tf)))
+ok("... and gives the same option columns, with the codebook's types elsewhere",
+   all(vapply(option_columns, function(col) same_as_export(tf[[col]], col), logical(1))))
+ok("options = FALSE keeps only the lists", !any(option_columns %in% names(sondavi_unnest(ty, options = FALSE))))
+ok("text boxes, a constant sum and its total spread like the export",
+   identical(tf$contact.phone[1:2], c("+49 30 123", "+43 1 999")) && identical(as.numeric(tf$`split-total.points`), c(100, 100, NA)) &&
+   same_as_export(tf$split.o2.points, "split.o2.points"))
+
+cat("\nThe questionnaire's own scale scores, worked out again\n")
+ty_cb <- attr(ty, "sondavi_codebook")
+ok("the codebook names each row's subscale", identical(ty_cb$subscale[match(c("sdq.e1", "sdq.c1", "sdq.p1"), ty_cb$name)], c("emo", "con", "pro")))
+ok("and how each score is worked out",
+   identical(ty_cb$scale_score[[match("sdq_total", ty_cb$name)]][c("method", "min_items", "subscales", "items")],
+             list(method = "sum", min_items = 3L, subscales = c("emo", "con"), items = c("sdq.e1", "sdq.e2", "sdq.c1", "sdq.c2"))))
+for (score in c("sdq_emo", "sdq_con", "sdq_total", "sdq_mean", "child.0.k_score", "child.1.k_score")) {
+  got <- sondavi_scale(tf, score = score)
+  ok(paste0("score = \"", score, "\" gives the stored score of every row (and the export's)"),
+     isTRUE(all.equal(unname(got), as.numeric(tf[[score]]), check.attributes = FALSE)) && same_as_export(round(got, 10), score))
+}
+ok("method = \"sum\" by hand gives the same as the subscale's score", identical(unname(sondavi_scale(tf, c("sdq.e1", "sdq.e2"), method = "sum")), c(3, NA, NA)))
+ok("a sum over fewer items when fewer are asked for", identical(unname(sondavi_scale(tf, c("sdq.e1", "sdq.e2"), min_items = 1, method = "sum")), c(3, 1, NA)))
+ok("the score's minimum can be lowered on purpose", identical(unname(sondavi_scale(tf, score = "sdq_emo", min_items = 1)), c(3, 1, NA)))
+ok("a row of the score nobody answered (b in the second child) is simply unanswered, not an error",
+   identical(unname(sondavi_scale(tf, score = "child.1.k_score")), c(2, NA, NA)) && !("child.1.k.b" %in% names(tf)))
+ok("an unknown method is refused", inherits(tryCatch(sondavi_scale(tf, c("sdq.e1"), method = "median"), error = function(e) e), "error"))
+ok("a variable that is no scale score says so", grepl("no scale score", tryCatch(sondavi_scale(tf, score = "satisfied"), error = conditionMessage)))
+old_cb <- ty_cb
+old_cb$scale_score <- NULL
+ok("an older platform without the rule: a plain message naming the way by hand",
+   grepl("items.*method", tryCatch(sondavi_scale(tf, score = "sdq_emo", codebook = old_cb), error = conditionMessage)))
+ok("neither items nor score: a plain message", grepl("items", tryCatch(sondavi_scale(tf), error = conditionMessage)))
 
 cat("\n", checks - failures, "/", checks, " checks passed\n", sep = "")
 if (failures) quit(status = 1)

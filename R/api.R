@@ -72,7 +72,7 @@ codebook_frame <- function(vars) {
     return(data.frame(
       name = character(), label = character(), type = character(),
       surveyjs_type = character(), reverse_scored = logical(),
-      reverse_min = numeric(), reverse_max = numeric(), stringsAsFactors = FALSE
+      reverse_min = numeric(), reverse_max = numeric(), subscale = character(), stringsAsFactors = FALSE
     ))
   }
 
@@ -89,9 +89,20 @@ codebook_frame <- function(vars) {
       reverse_scored = !is.null(scale),
       reverse_min = as.numeric(scale$min %||% NA_real_),
       reverse_max = as.numeric(scale$max %||% NA_real_),
+      # A matrix row's subscale, as set in the questionnaire's Rows table.
+      subscale = v$subscale %||% NA_character_,
       stringsAsFactors = FALSE
     )
   }))
+
+  # A scale score computed in the questionnaire says how it is worked out (see sondavi_scale(score =)).
+  # A platform before 0.106 does not say it: the column is all NULL then.
+  out$scale_score <- lapply(vars, function(v) {
+    rule <- v$scale_score
+    if (is.null(rule)) return(NULL)
+    list(matrix = rule$matrix, method = rule$method, min_items = rule$min_items,
+         subscales = unlist(rule$subscales), items = unlist(rule$items))
+  })
 
   out$value_labels <- lapply(vars, function(v) {
     labs <- v$value_labels
@@ -232,6 +243,66 @@ sondavi_fingerprint <- function(data) {
   )
   cat(line, "\n")
   invisible(line)
+}
+
+#' The files participants uploaded, downloaded and unpacked
+#'
+#' The platform keeps an uploaded file as a file; the responses only name it
+#' (`name`, `type`, `size` and a reference `sondavi-file:<id>`). This fetches all
+#' of a study's files as one ZIP and unpacks it into `dir`: a folder per question,
+#' named like its column (`drawing`, in a loop `child.0.drawing`), the files named
+#' by response - `<response_id>-<n>.<extension>`, never by the name the participant
+#' gave them. So the files of one task can be rated together without seeing whose
+#' they are.
+#'
+#' @param con A connection from [sondavi_connect()].
+#' @param survey_id The study's id, as listed by [sondavi_surveys()].
+#' @param dir Where to unpack. Defaults to `sondavi-files-<survey_id>` in the
+#'   working directory.
+#' @param include_test `TRUE` gives the files of the test responses instead.
+#' @return A data frame, one row per file: `response_id`, `respondent_id` and the
+#'   panel columns (only when the token may read identifiers and the study shows
+#'   them), `question`, `question_text`, `file_number`, `original_name`, `type`,
+#'   `size` (bytes), `saved_at`, `test`, `path` (inside the ZIP), `sha256`, and
+#'   `local_path` - where the file now is on this computer. Join it to
+#'   [sondavi_responses()] over `response_id`.
+#' @examples
+#' \dontrun{
+#' f <- sondavi_files(con, 42)
+#' drawings <- f[f$question == "drawing", ]
+#' file.exists(drawings$local_path)
+#' }
+#' @export
+sondavi_files <- function(con, survey_id, dir = paste0("sondavi-files-", survey_id), include_test = FALSE) {
+  zip <- tempfile(fileext = ".zip")
+  on.exit(unlink(zip), add = TRUE)
+  query <- if (isTRUE(include_test)) list(include_test = 1) else list()
+  tryCatch(
+    sondavi_get(con, paste0("surveys/", survey_id, "/files"), query, dest = zip),
+    error = function(e) {
+      if (!grepl("(404)", conditionMessage(e), fixed = TRUE)) stop(e)
+      # The route is new: an older platform knows the study but not this question about it.
+      stop(conditionMessage(e), " If the study is in your token's scope, the platform may be older than version ",
+           "0.106, the first to keep uploaded files as files.", call. = FALSE)
+    }
+  )
+
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  target <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+  names <- utils::unzip(zip, list = TRUE)$Name
+  # Nothing is written outside the folder, whatever a name in the ZIP says.
+  if (any(grepl("(^|/)\\.\\.(/|$)", names) | grepl("^(/|[A-Za-z]:)", names))) {
+    stop("The ZIP holds a path outside its folder.", call. = FALSE)
+  }
+  utils::unzip(zip, exdir = target)
+
+  files <- utils::read.csv(file.path(target, "files.csv"), fileEncoding = "UTF-8-BOM",
+                           stringsAsFactors = FALSE, check.names = FALSE, colClasses = "character")
+  for (col in intersect(c("response_id", "file_number", "size"), names(files))) {
+    files[[col]] <- as.numeric(files[[col]])
+  }
+  files$local_path <- if (nrow(files)) file.path(target, files$path) else character()
+  files
 }
 
 # -- helpers ------------
@@ -499,20 +570,34 @@ insert_after <- function(data, after, name, value) {
 #' `column1`, `column2` ...) cannot be mirrored: it is `NA`, with a warning, as
 #' its reversed copy is empty in the platform's export.
 #'
-#' `sondavi_scale()` is the mean of those numbers per row. It is `NA` for a row
-#' with fewer than `min_items` numbers - by default every item has to be
-#' answered, so a mean over fewer items never happens unnoticed. Lower
-#' `min_items` to allow gaps, e.g. `min_items = 3` for three of four; more than
-#' there are items means every item. The rule is the platform's own (its scale
-#' score in the questionnaire gives the same numbers): an item a condition hid
-#' from the participant is empty in the data and counts as unanswered.
+#' `sondavi_scale()` is the mean of those numbers per row, or their sum with
+#' `method = "sum"`. It is `NA` for a row with fewer than `min_items` numbers -
+#' by default every item has to be answered, so a score over fewer items never
+#' happens unnoticed. Lower `min_items` to allow gaps, e.g. `min_items = 3` for
+#' three of four; more than there are items means every item. The rule is the
+#' platform's own (its scale score in the questionnaire gives the same numbers):
+#' an item a condition hid from the participant is empty in the data and counts
+#' as unanswered.
+#'
+#' A scale score the questionnaire computes itself (Σ in the editor) can be
+#' worked out again with `score =` and its name: the codebook says which rows it
+#' counts (the rows of its subscales, in a loop those of the same copy), mean or
+#' sum, and how many have to be answered. That is the way to give responses
+#' recorded before a score was added or changed the score of now - the platform
+#' keeps every response's score as it was computed then.
 #'
 #' @param data A data frame from [sondavi_unnest()] (a matrix row is a column of
 #'   its own there) or [sondavi_responses()].
 #' @param items Column names of the items, as in the questionnaire.
 #' @param reverse `FALSE` gives every item as answered, also the reverse-scored
 #'   ones.
-#' @param min_items How many of the items a row needs to get a score.
+#' @param min_items How many of the items a row needs to get a score. With
+#'   `score`, the score's own minimum unless you give one.
+#' @param method `"mean"` or `"sum"`.
+#' @param score The name of a scale score of the questionnaire (e.g.
+#'   `"sdq_emo"`): its items, method and minimum come from the codebook, so
+#'   `items` and `method` are not needed. Needs a platform that describes its
+#'   scale scores in the codebook (version 0.106 or later).
 #' @param codebook The study's codebook. The data carry it, but some steps drop
 #'   it - `subset()` on a plain data frame, for one; then pass
 #'   `sondavi_codebook(con, id)`.
@@ -524,6 +609,11 @@ insert_after <- function(data, after, name, value) {
 #' items <- c("b5.calm", "b5.worry", "b5.rested")   # b5.worry is reverse-scored
 #' psych::alpha(sondavi_items(flat, items))
 #' flat$b5_score <- sondavi_scale(flat, items)
+#'
+#' # A score of the questionnaire, worked out again for every response:
+#' flat$sdq_emo_now <- sondavi_scale(flat, score = "sdq_emo")
+#' # The same by hand - the emotional subscale's rows, summed:
+#' sondavi_scale(flat, c("sdq.e1", "sdq.e2"), method = "sum")
 #' }
 #' @export
 sondavi_items <- function(data, items, reverse = TRUE, codebook = attr(data, "sondavi_codebook")) {
@@ -566,13 +656,113 @@ sondavi_items <- function(data, items, reverse = TRUE, codebook = attr(data, "so
 
 #' @rdname sondavi_items
 #' @export
-sondavi_scale <- function(data, items, min_items = length(items), codebook = attr(data, "sondavi_codebook")) {
+sondavi_scale <- function(data, items = NULL, min_items = NULL, codebook = attr(data, "sondavi_codebook"),
+                          method = c("mean", "sum"), score = NULL) {
+  if (!is.null(score)) {
+    rule <- scale_rule(score, codebook)
+    items <- rule$items
+    method <- rule$method
+    if (is.null(min_items)) min_items <- rule$min_items
+    # A row of the score that no response answered has no column of its own: unanswered, not unknown.
+    for (absent in setdiff(items, names(data))) data[[absent]] <- rep(NA, nrow(data))
+  } else {
+    method <- match.arg(method)
+  }
+  if (is.null(items)) stop("Name the `items`, or a scale score of the questionnaire with `score`.", call. = FALSE)
+  # No item at all (a subscale no row has): no score, as in the questionnaire.
+  if (!length(items)) return(rep(NA_real_, nrow(data)))
+  if (is.null(min_items)) min_items <- length(items)
   if (min_items < 1) stop("`min_items` has to be at least 1.", call. = FALSE)
   values <- sondavi_items(data, items, codebook = codebook)
-  score <- rowMeans(values, na.rm = TRUE)
+  out <- if (method == "sum") rowSums(values, na.rm = TRUE) else rowMeans(values, na.rm = TRUE)
   # More than there are items means every item, as in the platform's scale score.
-  score[rowSums(!is.na(values)) < min(min_items, length(items))] <- NA_real_
-  score
+  out[rowSums(!is.na(values)) < min(min_items, length(items))] <- NA_real_
+  out
+}
+
+#' One column per option of a question with several answers
+#'
+#' A multiple-choice answer arrives as a list - `c("phone", "other")` - because
+#' that is how the platform stores it. For a table or a model you usually want a
+#' column per option, as the platform's export files have them:
+#' `devices.phone` is 1 when the option was chosen, 0 when the question was
+#' answered without it and `NA` when the question was not answered. For a
+#' ranking the column holds the option's place, 1 being the first.
+#'
+#' The options and their order come from the codebook - SurveyJS' own "None",
+#' "Other" and "Don't know" included -; an answer the codebook does not list (an
+#' option deleted later) gets a column of its own after them. The new columns
+#' stand right after the question's own, which stays as it is.
+#'
+#' @param data A data frame from [sondavi_responses()] or [sondavi_unnest()].
+#' @param names The questions to spread. By default every column whose answers
+#'   are lists of options (multiple choice, tag box, ranking, picture choice).
+#' @param codebook The study's codebook. The data carry it; without one the
+#'   options are the answers that occur, in the order they first occur.
+#' @return `data` with the option columns added.
+#' @examples
+#' \dontrun{
+#' d <- sondavi_options(sondavi_responses(con, 42))
+#' table(d$devices.phone)
+#' }
+#' @export
+sondavi_options <- function(data, names = NULL, codebook = attr(data, "sondavi_codebook")) {
+  if (is.null(names)) names <- names(data)[vapply(data, holds_options, logical(1))]
+  missing <- setdiff(names, names(data))
+  if (length(missing)) stop("Not a column of the data: ", quoted_list(missing), ".", call. = FALSE)
+
+  kept <- attributes(data)[setdiff(names(attributes(data)), c("names", "row.names", "class"))]
+  order <- names(data)
+  for (name in names) {
+    x <- data[[name]]
+    if (!holds_options(x)) stop(quoted_list(name), " holds no list of options.", call. = FALSE)
+    at <- if (is.null(codebook)) NA_integer_ else match(name, codebook$name)
+    known <- if (is.na(at)) character() else codebook$value_labels[[at]]$value
+    keys <- lapply(x, function(v) if (length(v)) value_key(unlist(v)) else character())
+    seen <- unique(unlist(keys, use.names = FALSE))
+    options <- c(known, setdiff(seen[!is.na(seen)], known))
+    ranking <- !is.na(at) && identical(codebook$surveyjs_type[at], "ranking")
+    answered <- vapply(keys, function(k) length(k) > 0 && !all(is.na(k)), logical(1))
+    added <- paste0(name, ".", options)
+    for (i in seq_along(options)) {
+      data[[added[i]]] <- vapply(seq_along(keys), function(row) {
+        if (!answered[row]) return(NA_integer_)
+        if (ranking) return(match(options[i], keys[[row]]))
+        as.integer(options[i] %in% keys[[row]])
+      }, integer(1))
+    }
+    # Right after the question, as in the export files (called twice, the columns are only filled again).
+    order <- setdiff(order, added)
+    order <- append(order, added, after = match(name, order))
+  }
+  data <- data[, order, drop = FALSE]
+  for (a in names(kept)) attr(data, a) <- kept[[a]]
+  data
+}
+
+# A column whose answers are lists of options (or empty): what sondavi_options() spreads.
+holds_options <- function(x) {
+  is.list(x) && !is.data.frame(x) && any(vapply(x, is_option_list, logical(1))) &&
+    all(vapply(x, function(v) is.null(v) || is_option_list(v) || (is.atomic(v) && length(v) <= 1 && all(is.na(v))), logical(1)))
+}
+
+# How a scale score of the questionnaire is worked out, from the codebook (SPECS §66.4 of the platform).
+scale_rule <- function(score, codebook) {
+  if (is.null(codebook)) {
+    stop("No codebook to read the scale score from; pass `codebook = sondavi_codebook(con, id)`.", call. = FALSE)
+  }
+  at <- match(score, codebook$name)
+  if (is.na(at)) stop("Not a variable of the codebook: ", quoted_list(score), ".", call. = FALSE)
+  rule <- if ("scale_score" %in% names(codebook)) codebook$scale_score[[at]] else NULL
+  if (is.null(rule)) {
+    stop(quoted_list(score), " is no scale score the codebook describes. Platforms before version 0.106 do not ",
+         "describe their scale scores; name the `items` and the `method` then.", call. = FALSE)
+  }
+  if (!(rule$method %in% c("mean", "sum"))) {
+    stop(quoted_list(score), " is worked out as ", quoted_list(rule$method), ", which this version of the package ",
+         "does not know.", call. = FALSE)
+  }
+  rule
 }
 
 # The stored numbers of one column, whatever form it arrived in: a factor gets its codes back
@@ -749,6 +939,10 @@ snapshot_frame <- function(s) {
 #' @param data The result of [sondavi_responses()] or
 #'   [sondavi_snapshot_responses()].
 #' @param columns Which list columns to spread. Default: all of them.
+#' @param options A question with several answers (multiple choice, tag box,
+#'   ranking) stays one list column and gets one column per option right after
+#'   it, as in the export files - see [sondavi_options()]. `FALSE` leaves the
+#'   list alone.
 #' @param codebook The codebook for the new columns. Default: the one
 #'   [sondavi_responses()] applied and kept with the data (with
 #'   `labels = TRUE`). `NULL` leaves them exactly as stored, without reversed
@@ -768,7 +962,7 @@ snapshot_frame <- function(s) {
 #' flat[, c("b5.worry", "b5.worry_r")]      # the answer, and 6 - answer on a 1-5 scale
 #' }
 #' @export
-sondavi_unnest <- function(data, columns = NULL, codebook = attr(data, "sondavi_codebook")) {
+sondavi_unnest <- function(data, columns = NULL, codebook = attr(data, "sondavi_codebook"), options = TRUE) {
   nested <- names(data)[vapply(data, function(x) is.list(x) && !is.data.frame(x), logical(1))]
   targets <- if (is.null(columns)) nested else intersect(columns, nested)
 
@@ -776,6 +970,7 @@ sondavi_unnest <- function(data, columns = NULL, codebook = attr(data, "sondavi_
 
   kept <- attributes(data)[setdiff(names(attributes(data)), c("names", "row.names", "class"))]
   out <- data
+  option_lists <- character()
 
   for (column in targets) {
     # Reusing rows_to_frame is what keeps this consistent with the top level: the
@@ -793,11 +988,19 @@ sondavi_unnest <- function(data, columns = NULL, codebook = attr(data, "sondavi_
     after <- if (at < ncol(out)) out[, seq(at + 1, ncol(out)), drop = FALSE] else out[, 0, drop = FALSE]
 
     out <- if (ncol(spread)) cbind(before, spread, after) else cbind(before, after)
+    option_lists <- c(option_lists, names(spread)[vapply(spread, holds_options, logical(1))])
   }
 
   for (name in names(kept)) attr(out, name) <- kept[[name]]
+  if (isTRUE(options) && length(option_lists)) out <- sondavi_options(out, option_lists, codebook = codebook)
   if (requireNamespace("tibble", quietly = TRUE)) out <- tibble::as_tibble(out)
   out
+}
+
+# An answer that is a list of single values without names: the options chosen, in order.
+is_option_list <- function(value) {
+  is.list(value) && is.null(names(value)) && length(value) > 0 &&
+    all(vapply(value, function(v) is.atomic(v) && length(v) == 1, logical(1)))
 }
 
 # One stored answer to a named, flat list. Objects contribute their names,
@@ -816,6 +1019,14 @@ flatten_answer <- function(value, prefix) {
     return(leaf)
   }
   if (!length(value)) return(list())
+  # A list of options (multiple choice, tag box, ranking, a matrix row of tick boxes) is ONE answer. Spread by
+  # position, `devices.0` read like an option and was only "the first one chosen"; sondavi_options() gives a
+  # column per option instead.
+  if (is_option_list(value)) {
+    leaf <- list(value)
+    names(leaf) <- prefix
+    return(leaf)
+  }
 
   keys <- names(value)
   parts <- lapply(seq_along(value), function(i) {

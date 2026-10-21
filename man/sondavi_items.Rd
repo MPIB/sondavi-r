@@ -14,9 +14,11 @@ sondavi_items(
 
 sondavi_scale(
   data,
-  items,
-  min_items = length(items),
-  codebook = attr(data, "sondavi_codebook")
+  items = NULL,
+  min_items = NULL,
+  codebook = attr(data, "sondavi_codebook"),
+  method = c("mean", "sum"),
+  score = NULL
 )
 }
 \arguments{
@@ -32,7 +34,15 @@ ones.}
 it - \code{subset()} on a plain data frame, for one; then pass
 \code{sondavi_codebook(con, id)}.}
 
-\item{min_items}{How many of the items a row needs to get a score.}
+\item{min_items}{How many of the items a row needs to get a score. With
+\code{score}, the score's own minimum unless you give one.}
+
+\item{method}{\code{"mean"} or \code{"sum"}.}
+
+\item{score}{The name of a scale score of the questionnaire (e.g.
+\code{"sdq_emo"}): its items, method and minimum come from the codebook, so
+\code{items} and \code{method} are not needed. Needs a platform that describes its
+scale scores in the codebook (version 0.106 or later).}
 }
 \value{
 \code{sondavi_items()}: a data frame with one numeric column per item.
@@ -59,13 +69,21 @@ An item marked "Reverse-scored" whose scale has no numbers (columns named
 \code{column1}, \code{column2} ...) cannot be mirrored: it is \code{NA}, with a warning, as
 its reversed copy is empty in the platform's export.
 
-\code{sondavi_scale()} is the mean of those numbers per row. It is \code{NA} for a row
-with fewer than \code{min_items} numbers - by default every item has to be
-answered, so a mean over fewer items never happens unnoticed. Lower
-\code{min_items} to allow gaps, e.g. \code{min_items = 3} for three of four; more than
-there are items means every item. The rule is the platform's own (its scale
-score in the questionnaire gives the same numbers): an item a condition hid
-from the participant is empty in the data and counts as unanswered.
+\code{sondavi_scale()} is the mean of those numbers per row, or their sum with
+\code{method = "sum"}. It is \code{NA} for a row with fewer than \code{min_items} numbers -
+by default every item has to be answered, so a score over fewer items never
+happens unnoticed. Lower \code{min_items} to allow gaps, e.g. \code{min_items = 3} for
+three of four; more than there are items means every item. The rule is the
+platform's own (its scale score in the questionnaire gives the same numbers):
+an item a condition hid from the participant is empty in the data and counts
+as unanswered.
+
+A scale score the questionnaire computes itself (Σ in the editor) can be
+worked out again with \verb{score =} and its name: the codebook says which rows it
+counts (the rows of its subscales, in a loop those of the same copy), mean or
+sum, and how many have to be answered. That is the way to give responses
+recorded before a score was added or changed the score of now - the platform
+keeps every response's score as it was computed then.
 }
 \examples{
 \dontrun{
@@ -73,5 +91,10 @@ flat <- sondavi_unnest(sondavi_responses(con, 42))
 items <- c("b5.calm", "b5.worry", "b5.rested")   # b5.worry is reverse-scored
 psych::alpha(sondavi_items(flat, items))
 flat$b5_score <- sondavi_scale(flat, items)
+
+# A score of the questionnaire, worked out again for every response:
+flat$sdq_emo_now <- sondavi_scale(flat, score = "sdq_emo")
+# The same by hand - the emotional subscale's rows, summed:
+sondavi_scale(flat, c("sdq.e1", "sdq.e2"), method = "sum")
 }
 }

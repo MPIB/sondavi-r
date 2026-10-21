@@ -1,3 +1,49 @@
+# sondavi 0.9.0
+
+## Scale scores of the questionnaire, worked out again
+
+* `sondavi_scale(flat, score = "sdq_emo")` works out a scale score the questionnaire computes
+  itself (Σ in the editor): the codebook now says which rows it counts - those of its
+  subscales, in a loop those of the same copy -, mean or sum, and how many have to be
+  answered. That is the way to give responses recorded before a score was added or changed
+  the score of now; the platform keeps every response's score as it was computed then.
+  Needs a platform that describes its scale scores (version 0.106 or later); with an older
+  one, name the items.
+* `sondavi_scale()` takes `method = "sum"` as well as the mean.
+* `sondavi_codebook()` has two new columns: `subscale` (a matrix row's subscale) and
+  `scale_score` (a list column: how a scale score is worked out).
+
+## Questions with several answers
+
+* `sondavi_options()` gives one column per option of a multiple-choice question, a tag box,
+  a picture choice or a ranking, as the export files have them: 1 when the option was
+  chosen, 0 when the question was answered without it, `NA` when it was not answered; for a
+  ranking the option's place.
+* `sondavi_unnest()` keeps such an answer as one list column and adds those option columns
+  right after it (`options = FALSE` leaves them out). It used to spread the list by
+  position - `devices.0`, `devices.1` - which read like options and were only "the first
+  one chosen", "the second one chosen".
+
+## Tested against more of what researchers ask
+
+The tests now include a study with multiple choice ("None", "Other" with its text), a tag
+box, a ranking, a rating, yes/no, a drop-down with "Don't know", text boxes, a constant sum
+with its total, an SDQ-like matrix with subscales and the questionnaire's own scale scores,
+and a loop with a score per copy - recorded from the platform, and checked value by value
+against the platform's own export file. The platform's scale score cases now include sums.
+
+## The files participants uploaded
+
+`sondavi_files(con, survey_id)` downloads the files of a study's "File Upload" questions and
+unpacks them: a folder per question, the files named by response (`drawing/1234-1.png`) rather
+than by the name a participant gave them, and a data frame with one row per file - whose it
+is (`response_id`, and `respondent_id` where your token may read it), the original name, type,
+size, checksum and `local_path`, where the file now is. Join it to `sondavi_responses()` over
+`response_id`.
+
+In the responses themselves an uploaded file now appears as its name, type, size and a
+reference; the file is no longer in the row.
+
 # sondavi 0.8.1
 
 * A check in the package's own tests passed a text where R expects `TRUE`. R 4.6 refuses

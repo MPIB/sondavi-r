@@ -60,7 +60,7 @@ sondavi_user_agent <- function() {
 
 # One request, with the two things a hand-written call usually gets wrong:
 # the server's own waiting time is honoured, and failures say what to do.
-sondavi_get <- function(con, path, query = list(), max_tries = 4, body = NULL) {
+sondavi_get <- function(con, path, query = list(), max_tries = 4, body = NULL, dest = NULL) {
   stopifnot(inherits(con, "sondavi_connection"))
 
   req <- httr2::request(paste0(con$base_url, "/api/v1/", path))
@@ -78,12 +78,13 @@ sondavi_get <- function(con, path, query = list(), max_tries = 4, body = NULL) {
 
   if (!is.null(body)) req <- httr2::req_body_json(req, body)
 
-  resp <- httr2::req_perform(req)
+  # A file (the uploaded files' ZIP) goes straight to disk instead of through memory.
+  resp <- if (is.null(dest)) httr2::req_perform(req) else httr2::req_perform(req, path = dest)
   status <- httr2::resp_status(resp)
 
   # 201 as well: recording a snapshot creates something (the platform records snapshots this way).
   if (status %in% c(200L, 201L)) {
-    return(parse_json(resp))
+    return(if (is.null(dest)) parse_json(resp) else invisible(dest))
   }
 
   message_of <- function(resp) {

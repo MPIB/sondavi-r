@@ -125,6 +125,24 @@ on an exported file and one built on the API agree on what a variable is called.
 The new columns get the codebook as well: a matrix cell with value labels is a
 factor, like the questions beside it.
 
+### Questions with several answers
+
+A multiple-choice answer is the list of options chosen - `c("phone", "other")` -
+and stays one list column. `sondavi_unnest()` adds one column per option right
+after it, as the export files have them: 1 when the option was chosen, 0 when
+the question was answered without it, `NA` when it was not answered. For a
+ranking the column holds the option's place.
+
+```{r}
+flat[, c("devices.phone", "devices.laptop", "devices.none", "devices.other")]
+#>   devices.phone devices.laptop devices.none devices.other
+#> 1             1              0            0             1
+#> 2             0              0            1             0
+#> 3            NA             NA           NA            NA
+```
+
+`sondavi_options()` does the same for data you have not unnested.
+
 ### Reverse-scored items
 
 A scale often has an item worded the other way round ("I worry a lot" among
@@ -164,7 +182,19 @@ sondavi_items(flat, c("b5.calm", "b5.worry"))    # the numbers behind it
 ```
 
 The score is `NA` unless every item has a number; `min_items` allows gaps on
-purpose. `sondavi_items()` is what `cor()` or `psych::alpha()` want.
+purpose, `method = "sum"` adds instead of averaging. `sondavi_items()` is what
+`cor()` or `psych::alpha()` want.
+
+A score the questionnaire computes itself (Σ in the editor, with subscales if
+the rows have them) is stored with every response, as it was computed then. To
+work it out again - for responses recorded before you added or changed it -
+name it; the codebook says which rows it counts, mean or sum and how many have
+to be answered:
+
+```{r}
+flat$sdq_emo_now <- sondavi_scale(flat, score = "sdq_emo")
+cb[!is.na(cb$subscale), c("name", "subscale")]   # which row belongs to which subscale
+```
 
 ### Image marking
 

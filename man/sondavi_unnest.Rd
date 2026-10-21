@@ -4,7 +4,12 @@
 \alias{sondavi_unnest}
 \title{Spread nested answers into one column each}
 \usage{
-sondavi_unnest(data, columns = NULL, codebook = attr(data, "sondavi_codebook"))
+sondavi_unnest(
+  data,
+  columns = NULL,
+  codebook = attr(data, "sondavi_codebook"),
+  options = TRUE
+)
 }
 \arguments{
 \item{data}{The result of \code{\link[=sondavi_responses]{sondavi_responses()}} or
@@ -16,6 +21,11 @@ sondavi_unnest(data, columns = NULL, codebook = attr(data, "sondavi_codebook"))
 \code{\link[=sondavi_responses]{sondavi_responses()}} applied and kept with the data (with
 \code{labels = TRUE}). \code{NULL} leaves them exactly as stored, without reversed
 copies.}
+
+\item{options}{A question with several answers (multiple choice, tag box,
+ranking) stays one list column and gets one column per option right after
+it, as in the export files - see \code{\link[=sondavi_options]{sondavi_options()}}. \code{FALSE} leaves the
+list alone.}
 }
 \value{
 The data frame with each nested column replaced, in place, by its
