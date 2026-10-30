@@ -213,6 +213,9 @@ sondavi_responses <- function(con, survey_id, since = NULL, include_test = FALSE
     survey_id = survey_id,
     abilities = unlist(first_meta$abilities %||% list())
   )
+  # The columns of the people's panel (`panel`, `panel_<column>`): they describe the person, not
+  # one response - sondavi_waves() keeps them once.
+  attr(out, "sondavi_panel_columns") <- as.character(unlist(first_meta$panel_columns %||% list()))
 
   if (requireNamespace("tibble", quietly = TRUE)) out <- tibble::as_tibble(out)
   out
@@ -1352,7 +1355,10 @@ empty_conversations <- function(has_respondent) {
 #'
 #' Fetches several studies and matches their responses by the same person. Each
 #' wave's columns are suffixed with its name, so `mood` becomes `mood_wave1` and
-#' `mood_wave2` instead of colliding.
+#' `mood_wave2` instead of colliding. The columns of the person's panel - `panel`
+#' (its name, with a panel per cohort the cohort) and your own, such as
+#' `panel_patient_code` - describe the person, not a wave: they appear once,
+#' unsuffixed, right after the key, from the first wave that has them.
 #'
 #' **Everyone is kept, including those who did not take part in every wave** -
 #' their later columns are `NA`. That is a full outer join rather than an inner
@@ -1386,7 +1392,9 @@ sondavi_waves <- function(con, survey_ids, names = NULL, by = "respondent_id", .
     stop("`names` must have one entry per study.", call. = FALSE)
   }
 
-  waves <- lapply(seq_along(survey_ids), function(i) {
+  person <- NULL
+  waves <- vector("list", length(survey_ids))
+  for (i in seq_along(survey_ids)) {
     d <- sondavi_responses(con, survey_ids[[i]], ...)
 
     if (!by %in% base::names(d)) {
@@ -1399,10 +1407,40 @@ sondavi_waves <- function(con, survey_ids, names = NULL, by = "respondent_id", .
       )
     }
 
+    panel <- intersect(attr(d, "sondavi_panel_columns") %||% character(), base::names(d))
+    d <- as.data.frame(d, stringsAsFactors = FALSE)
+    if (length(panel)) {
+      person <- bind_person(person, d[, c(by, panel), drop = FALSE], by)
+      d <- d[, setdiff(base::names(d), panel), drop = FALSE]
+    }
+
     others <- setdiff(base::names(d), by)
     base::names(d)[match(others, base::names(d))] <- paste0(others, "_", labels[[i]])
-    d
-  })
+    waves[[i]] <- d
+  }
 
-  Reduce(function(a, b) merge(a, b, by = by, all = TRUE), waves)
+  joined <- Reduce(function(a, b) merge(a, b, by = by, all = TRUE), waves)
+  if (is.null(person)) return(joined)
+  out <- merge(person, joined, by = by, all.y = TRUE)
+  out[, c(by, setdiff(base::names(person), by), setdiff(base::names(joined), by)), drop = FALSE]
+}
+
+# The panel columns of everyone seen so far: one row per person, the first value a wave gave.
+bind_person <- function(person, add, by) {
+  if (is.null(person)) {
+    both <- add
+  } else {
+    for (n in setdiff(base::names(add), base::names(person))) person[[n]] <- NA
+    for (n in setdiff(base::names(person), base::names(add))) add[[n]] <- NA
+    both <- rbind(person, add[base::names(person)])
+  }
+  keys <- unique(both[[by]])
+  rows <- lapply(keys, function(k) {
+    part <- both[both[[by]] %in% k, , drop = FALSE]
+    as.data.frame(lapply(part, function(col) {
+      known <- col[!is.na(col)]
+      if (length(known)) known[1] else col[1]
+    }), stringsAsFactors = FALSE, check.names = FALSE)
+  })
+  do.call(rbind, rows)
 }

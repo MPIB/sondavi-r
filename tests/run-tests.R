@@ -519,6 +519,19 @@ ok("the join key is not suffixed", "respondent_id" %in% names(waves))
 dropped <- waves[is.na(waves$mood_w2), ]
 ok("someone who skipped the second wave is kept", nrow(dropped) == 1)
 ok("and is recognisable by their missing wave", dropped$respondent_id == "PNL-3")
+# The panel's columns describe the person, not a wave (meta.panel_columns, Jakob 30.10.2026): once, right after the key.
+ok("the responses name the panel's columns",
+   identical(attr(sondavi_responses(con, s$id[2]), "sondavi_panel_columns"), c("panel", "panel_patient_code", "panel_first_name", "panel_email")))
+ok("the panel and the patient code are one column each, unsuffixed, right after the key",
+   identical(names(waves)[2:3], c("panel", "panel_patient_code")) && !any(grepl("^panel_patient_code_", names(waves))))
+ok("everyone has their code, the one who dropped out too",
+   identical(waves$panel_patient_code[order(waves$respondent_id)], c("K-101", "K-102", "K-103")))
+# An identified wave brings the name, a pseudonymized one does not: the name a wave gave is kept, not the gap of another.
+pp <- bind_person(NULL, data.frame(respondent_id = "PNL-1", panel_first_name = "Eva", stringsAsFactors = FALSE), "respondent_id")
+pp <- bind_person(pp, data.frame(respondent_id = c("PNL-1", "PNL-2"), panel_first_name = NA_character_, panel_patient_code = c("K-101", "K-102"),
+                                 stringsAsFactors = FALSE), "respondent_id")
+ok("a value one wave gave is not lost to another's gap",
+   identical(pp$panel_first_name, c("Eva", NA)) && identical(pp$panel_patient_code, c("K-101", "K-102")))
 
 joined_err <- tryCatch(sondavi_waves(con, s$id[1]), error = function(e) conditionMessage(e))
 ok("one study is not a series", grepl("at least two", joined_err))

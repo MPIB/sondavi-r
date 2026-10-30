@@ -23,7 +23,10 @@ One data frame, one row per person seen in any wave.
 \description{
 Fetches several studies and matches their responses by the same person. Each
 wave's columns are suffixed with its name, so \code{mood} becomes \code{mood_wave1} and
-\code{mood_wave2} instead of colliding.
+\code{mood_wave2} instead of colliding. The columns of the person's panel - \code{panel}
+(its name, with a panel per cohort the cohort) and your own, such as
+\code{panel_patient_code} - describe the person, not a wave: they appear once,
+unsuffixed, right after the key, from the first wave that has them.
 }
 \details{
 \strong{Everyone is kept, including those who did not take part in every wave} -
