@@ -610,5 +610,66 @@ ok("an older platform without the rule: a plain message naming the way by hand",
    grepl("items.*method", tryCatch(sondavi_scale(tf, score = "sdq_emo", codebook = old_cb), error = conditionMessage)))
 ok("neither items nor score: a plain message", grepl("items", tryCatch(sondavi_scale(tf), error = conditionMessage)))
 
+cat("\nSimulations\n")
+fixture <- function(name) jsonlite::fromJSON(file.path(FIXTURES, name), simplifyVector = FALSE)
+SIM_SURVEY <- fixture("simulation_start.json")$data$survey_id
+
+comps <- sondavi_components(con, SIM_SURVEY)
+ok("the components arrive", identical(comps$id, c("survey-interview", "question:day")))
+params <- sondavi_parameters(con, SIM_SURVEY, "question:day")
+ok("with their parameters and the study's values", params$default[[which(params$name == "systemPrompt")]] == "Be brief.")
+ok("and their limits", params$max[params$name == "maxTurns"] == 100)
+fails_with("an unknown component names the ones there are", "survey-interview",
+           sondavi_parameters(con, SIM_SURVEY, "question:nope"))
+
+sim <- sondavi_simulation_start(con, SIM_SURVEY, "question:day",
+  parameters = list(systemPrompt = "Ask like a journalist.", temperature = 0.3),
+  inputs = list(locale = "en", context = list(mood = "3")), label = "journalist", run = "fixture")
+ok("a started simulation waits for text", sim$status == "active" && sim$stimulus$expects == "text")
+ok("it ran with the parameters asked for", sim$effective_parameters$systemPrompt == "Ask like a journalist.")
+
+# A failed model call records nothing; the package sends the same response again.
+sim <- sondavi_respond(sim, "FAIL ONCE")
+ok("a failed model call is sent again, not given up", sim$stimulus$turn == 2)
+sim <- sondavi_respond(sim, "The run, mostly.")
+ok("the summaries are a stimulus of their own", sim$stimulus$expects == "summary" && length(sim$stimulus$options) == 2)
+sim <- sondavi_respond(sim, choice = 1)
+ok("choosing one ends the simulation", sim$status == "completed" && is.null(sim$stimulus$expects))
+tr <- sondavi_transcript(sim)
+ok("the conversation is a data frame", identical(tr$role[1:2], c("interviewer", "respondent")))
+fails_with("one response at a time", "exactly one", sondavi_respond(sim, "x", choice = 1))
+fails_with("leaving a question out is a response of its own", "exactly one", sondavi_respond(sim, "x", skip = TRUE))
+fails_with("the text of Other goes with a value", "go with a value", sondavi_respond(sim, "x", other = "monthly"))
+
+sim <- sondavi_attach(sim, score = 0.75, feedback = "Asked one question at a time.", persona = list(job = "teacher"))
+ok("attached data comes back", sim$attachments$score == 0.75 && sim$attachments$persona$job == "teacher")
+sent <- sondavi_get(con, "../../__last_patch")
+ok("and was sent as an object of values", identical(sent$attachments$persona$job, "teacher") && sent$attachments$score == 0.75)
+invisible(sondavi_attach(sim, feedback = NULL))
+sent <- sondavi_get(con, "../../__last_patch")
+ok("a NULL removes a key: it travels as null", "feedback" %in% names(sent$attachments) && is.null(sent$attachments$feedback))
+
+listed <- sondavi_simulations(con, run = "fixture")
+ok("simulations are listed as a data frame", nrow(listed) >= 1 && "turns" %in% names(listed))
+
+played <- sondavi_simulate(con, SIM_SURVEY, "question:day", function(st) {
+  if (identical(st$expects, "summary")) 0 else "I taught all morning."
+})
+ok("sondavi_simulate() plays a simulation to its end", played$status == "completed")
+
+whole <- sondavi_simulation_start(con, SIM_SURVEY, "survey-interview")
+ok("a question with options expects a choice", whole$stimulus$expects == "choice" &&
+   identical(vapply(whole$stimulus$question$choices, function(c) c$text, ""), c("Bad", "Neutral", "Good")))
+
+started <- Sys.time()
+budget <- tryCatch(sondavi_simulation_start(con, SIM_SURVEY, "question:exhausted"),
+                   sondavi_budget_exhausted = function(e) e)
+ok("a used-up budget stops with its own error, at once",
+   inherits(budget, "sondavi_budget_exhausted") && budget$retry_after == 3600 &&
+     as.numeric(Sys.time() - started, units = "secs") < 10)
+ok("a print says where it stands", any(grepl("completed", capture.output(print(played)))))
+sondavi_simulation_delete(played)
+ok("a simulation can be deleted", TRUE)
+
 cat("\n", checks - failures, "/", checks, " checks passed\n", sep = "")
 if (failures) quit(status = 1)

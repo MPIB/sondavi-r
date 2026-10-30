@@ -61,6 +61,16 @@ sondavi_user_agent <- function() {
 # One request, with the two things a hand-written call usually gets wrong:
 # the server's own waiting time is honoured, and failures say what to do.
 sondavi_get <- function(con, path, query = list(), max_tries = 4, body = NULL, dest = NULL) {
+  sondavi_request(con, if (is.null(body)) "GET" else "POST", path, body, query, max_tries, dest)
+}
+
+# Recording a snapshot stores which responses a result was computed from; a simulation step
+# hands the platform a response (SPECS §88). Neither changes a questionnaire.
+sondavi_post <- function(con, path, body) {
+  sondavi_request(con, "POST", path, body)
+}
+
+sondavi_request <- function(con, method, path, body = NULL, query = list(), max_tries = 4, dest = NULL) {
   stopifnot(inherits(con, "sondavi_connection"))
 
   req <- httr2::request(paste0(con$base_url, "/api/v1/", path))
@@ -73,16 +83,28 @@ sondavi_get <- function(con, path, query = list(), max_tries = 4, body = NULL, d
 
   # The platform limits per token and says how long to wait. Retrying without
   # reading Retry-After is how a script turns a small limit into a long outage.
-  req <- httr2::req_retry(req, max_tries = max_tries, retry_on_failure = TRUE)
+  # Except for a day's simulated turns being used up: that wait lasts until midnight,
+  # so it is reported, not waited out.
+  transient <- function(resp) {
+    status <- httr2::resp_status(resp)
+    if (status == 429L) return(!identical(reason_of(resp), "budget_exhausted"))
+    status == 503L
+  }
+  retry <- list(req, max_tries = max_tries, is_transient = transient)
+  # Retrying after a dropped connection came with httr2 1.0.1; older versions retry on
+  # answers only, which is still right for everything above.
+  if ("retry_on_failure" %in% names(formals(httr2::req_retry))) retry$retry_on_failure <- TRUE
+  req <- do.call(httr2::req_retry, retry)
   req <- httr2::req_error(req, is_error = function(resp) FALSE)
 
-  if (!is.null(body)) req <- httr2::req_body_json(req, body)
+  if (!is.null(body)) req <- httr2::req_body_json(req, body, null = "null")
+  req <- httr2::req_method(req, method)
 
   # A file (the uploaded files' ZIP) goes straight to disk instead of through memory.
   resp <- if (is.null(dest)) httr2::req_perform(req) else httr2::req_perform(req, path = dest)
   status <- httr2::resp_status(resp)
 
-  # 201 as well: recording a snapshot creates something (the platform records snapshots this way).
+  # 201 as well: recording a snapshot or starting a simulation creates something.
   if (status %in% c(200L, 201L)) {
     return(if (is.null(dest)) parse_json(resp) else invisible(dest))
   }
@@ -90,6 +112,18 @@ sondavi_get <- function(con, path, query = list(), max_tries = 4, body = NULL, d
   message_of <- function(resp) {
     out <- try(parse_json(resp)$message, silent = TRUE)
     if (inherits(out, "try-error") || is.null(out)) "" else out
+  }
+  reason <- reason_of(resp)
+
+  if (status == 429L && identical(reason, "budget_exhausted")) {
+    sondavi_abort(
+      paste0(message_of(resp), " (Retry-After: ", httr2::resp_header(resp, "Retry-After"), " s)"),
+      "sondavi_budget_exhausted",
+      retry_after = suppressWarnings(as.integer(httr2::resp_header(resp, "Retry-After")))
+    )
+  }
+  if (identical(reason, "model_failed") || identical(reason, "busy")) {
+    sondavi_abort(message_of(resp), "sondavi_retryable", reason = reason)
   }
 
   stop(switch(
@@ -112,8 +146,14 @@ sondavi_get <- function(con, path, query = list(), max_tries = 4, body = NULL, d
   ), call. = FALSE)
 }
 
-# Recording a snapshot is the one write this API has - it stores which responses a
-# result was computed from, never their contents.
-sondavi_post <- function(con, path, body) {
-  sondavi_get(con, path, query = list(), body = body)
+reason_of <- function(resp) {
+  out <- try(parse_json(resp)$reason, silent = TRUE)
+  if (inherits(out, "try-error")) NULL else out
+}
+
+# An error a script can catch by its class, e.g.
+# tryCatch(..., sondavi_budget_exhausted = function(e) e$retry_after)
+sondavi_abort <- function(message, class, ...) {
+  stop(structure(class = c(class, "sondavi_error", "error", "condition"),
+                 list(message = message, call = NULL, ...)))
 }

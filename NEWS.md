@@ -1,3 +1,29 @@
+# sondavi 0.10.0
+
+## Simulations
+
+Play a study's AI interviews from a script (platform 0.107, needs a token with the
+permission "Run simulations").
+
+* `sondavi_components()` and `sondavi_parameters()` list what can be simulated and how —
+  `default` is the value the study has now.
+* `sondavi_simulation_start()` and `sondavi_respond()` go step by step; `sondavi_simulate()`
+  plays a whole simulation with a function of yours as the respondent. A model call that
+  fails records nothing on the platform, so the same response is sent again.
+* A question the interview answers with buttons (`expects == "choice"`) takes one of the
+  values it offers, as in the interview: `sondavi_respond(sim, value = ..., other = ...,
+  comment = ...)`, or `skip = TRUE` where `question$can_skip`. Text is not taken there. The
+  stimulus lists what the buttons offer (`choices`, `special_items`, `rate_values`, ...).
+* `sondavi_attach()` keeps your own data with a simulation; `sondavi_simulations()`,
+  `sondavi_simulation()`, `sondavi_transcript()` and `sondavi_simulation_delete()` find,
+  read and remove them.
+* A used-up daily budget stops at once with an error of class `sondavi_budget_exhausted`
+  (carrying `retry_after`) instead of waiting until midnight.
+* Works with httr2 1.0.0 as well (retrying after a dropped connection needs 1.0.1).
+* `inst/examples/evolve-interviewer.R`: an evolutionary search over the interviewer's settings.
+
+Same as the Python package 0.10.0.
+
 # sondavi 0.9.0
 
 ## Scale scores of the questionnaire, worked out again

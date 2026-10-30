@@ -57,6 +57,10 @@ at most 90 days.
 | `sondavi_files(con, id)` | the files participants uploaded, unpacked, one row per file |
 | `sondavi_conversations(d)` | AI interview questions as one row per message |
 | `sondavi_waves(con, ids)` | join the waves of a study series by respondent |
+| `sondavi_components(con, id)` | what can be simulated, with its parameters |
+| `sondavi_simulate(con, id, component, responder)` | play an AI interview with your own settings |
+| `sondavi_attach(sim, ...)` | keep your own data (a score) with a simulation |
+| `sondavi_simulations(con)` | the simulations, by run |
 | `sondavi_verify(data, certificate)` | check a certified dataset against its certificate |
 
 `sondavi_responses()` applies the codebook by default, so a categorical question arrives as
@@ -364,6 +368,43 @@ study returns no identifier whatever the token says.
 
 Everything else is your study's own data and always arrives — which experimental group
 someone was in, their language, the order questions were shown in.
+
+## Simulations: play a study's AI interviews
+
+With a token that has the permission **Run simulations**, a script plays the AI interviews
+of a study — an interview question, or the interview over the whole survey — and the
+platform answers with exactly the interviewer that runs live. Each simulation runs with a
+parameter set: the study's own settings, changed where you say. Attach your own data to it
+(a score, the persona); in the platform the settings of a good simulation can be taken into
+the study with one click.
+
+```r
+sondavi_components(con, 42)$id
+#> [1] "survey-interview" "question:q7"
+
+persona <- function(stimulus) {
+  if (identical(stimulus$expects, "summary")) return(0)   # take the first summary
+  "I teach maths, mostly to teenagers."
+}
+sim <- sondavi_simulate(con, 42, "question:q7", persona,
+                        parameters = list(systemPrompt = "Ask like a journalist."),
+                        run = "trial-1")
+sondavi_transcript(sim)
+sim <- sondavi_attach(sim, score = 0.8)
+sondavi_simulations(con, run = "trial-1")
+```
+
+Step by step instead: `sondavi_simulation_start()`, then `sondavi_respond()` with `text`,
+`value` (a question answered with buttons, which takes nothing typed; `other` and `comment`
+with it, or `skip = TRUE` where it may be left out) or `choice` (a summary, `NA` to skip).
+Every start and
+response, except choosing a summary, uses one of your organisation's simulated turns for the
+day; when they are used up the package stops with an error of class
+`sondavi_budget_exhausted` rather than waiting until midnight.
+
+`inst/examples/evolve-interviewer.R` searches the interviewer's settings with a small
+evolutionary algorithm. Simulations are never responses, and a script never changes the
+study.
 
 ## The whole thing, end to end
 
